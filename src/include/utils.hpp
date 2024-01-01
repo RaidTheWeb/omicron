@@ -1,11 +1,11 @@
 #ifndef _UTILS_HPP
 #define _UTILS_HPP
 
-#include <bgfx/c99/bgfx.h>
 #include <ext/stb_ds.hpp>
 #include <ext/stb_image.hpp>
 #include <sys/time.h>
 #include <stdio.h>
+#include <stdint.h>
 
 // defined for API export from engine executable (exposes the function to scripts)
 #define OMICRON_EXPORT
@@ -174,6 +174,16 @@ static inline int utils_gcd(int a, int b) {
     return utils_gcd(b, a % b);
 }
 
+static inline bool utils_endswith(const char *str, const char *ending) {
+    size_t len = strlen(str);
+    size_t endlen = strlen(ending);
+    if (len >= endlen) {
+        return (!strncmp(str + (len - endlen), ending, endlen));
+    } else {
+        return false;
+    }
+}
+
 static inline int64_t utils_getcounter(void) {
 #if BX_CRT_NONE
 	int64_t i64 = crt0::getHPCounter();
@@ -199,10 +209,10 @@ static inline int64_t utils_getcounter(void) {
 
 OMICRON_EXPORT void *utils_downsize(void *data, int size, int bpp);
 OMICRON_EXPORT void *utils_generatemips(void *fullsize, int size, int bpp, size_t *length);
-OMICRON_EXPORT bgfx_shader_handle_t utils_loadshader(const char *filename);
-OMICRON_EXPORT bgfx_texture_handle_t utils_loadtexture(const char *filename, bool clamp);
-OMICRON_EXPORT bgfx_texture_handle_t utils_loadcubemapfromsides(const char *sides[], bool mips);
-OMICRON_EXPORT bgfx_texture_handle_t utils_loadcubemapfromktx(const char *filename, bool mips);
+// OMICRON_EXPORT bgfx_shader_handle_t utils_loadshader(const char *filename);
+// OMICRON_EXPORT bgfx_texture_handle_t utils_loadtexture(const char *filename, bool clamp);
+// OMICRON_EXPORT bgfx_texture_handle_t utils_loadcubemapfromsides(const char *sides[], bool mips);
+// OMICRON_EXPORT bgfx_texture_handle_t utils_loadcubemapfromktx(const char *filename, bool mips);
 OMICRON_EXPORT bool utils_checkktxpath(const char *filename);
 
 #define VECTOR_INVALID_INDEX (-1)

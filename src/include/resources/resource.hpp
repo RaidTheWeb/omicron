@@ -5,49 +5,54 @@
 #include <concurrency/job.hpp>
 #include <map>
 #include <resources/rpak.hpp>
-#include <stdatomic.h>
 #include <utils.hpp>
+#include <utils/pointers.hpp>
 
 namespace OResource {
+    class Resource {
+        public:
+            enum srctype {
+                SOURCE_RPAK, // from an RPak
+                SOURCE_VIRTUAL, // not actually a real file (possibly yet)
+                SOURCE_OSFS // operating system's filesystem
+            };
 
-    // Work this in with the RPak system
-    // I want a resource system that lets me resolve packages and stuff automatically
+            enum srctype type;
+            RPak *rpak; // RPak
+            struct RPak::tableentry rpakentry; // RPak entry header
+            void *ptr; // virtual is a pointer to whatever source
+            const char *path; // path to file (either os filesystem or RPak)
+            Resource() { }
+            Resource(RPak *rpak, const char *path) {
+                this->rpak = rpak;
+                this->path = path;
+                this->type = SOURCE_RPAK;
+            }
+            Resource(const char *path) {
+                this->path = path;
+                this->type = SOURCE_OSFS;
+            }
+            Resource(const char *path, void *src) {
+                this->path = path;
+                this->ptr = src;
+                this->type = SOURCE_OSFS;
+            }
+    };
 
     class ResourceManager {
         public:
+            // map hash of path to resources
+            std::map<uint32_t, Resource *> resources;
 
+            // load from RPak
+            void loadrpak(RPak *rpak);
+            void create(const char *path);
+            void create(const char *path, void *src);
+
+            Resource *get(const char *path);
     };
 
-    class Resource {
-        public:
-            enum type {
-                TYPE_GENERIC, // default resource type if file is outside of Omicron's resource system (text file or something)
-                TYPE_TEXTURE,
-                TYPE_MATERIAL, // depends on textures for materials
-                TYPE_MESH, // depends on material for visuals
-            };
-
-            struct header {
-                char magic[5]; // ORES\0
-                uint32_t version; // file version
-                uint8_t type; // type of resource file
-                size_t size; // file size (excluding header)
-            } __attribute__((packed));
-
-            uint8_t type = TYPE_GENERIC;
-
-            Resource(const char *path) { }
-    };
-
-    class GenericResource : public Resource {
-        public:
-            struct header header;
-            uint8_t *data = NULL; // pointer to the data contained within the resource file (heap allocated)
-
-            GenericResource(const char *path) : Resource(path) {
-
-            }
-    };
+    extern ResourceManager manager;
 
 }
 

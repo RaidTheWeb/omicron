@@ -2,7 +2,6 @@
 #define _ENGINE__MESH_HPP
 
 #include <assimp/scene.h>
-#include <bgfx/c99/bgfx.h>
 #include <engine/math.hpp>
 #include <renderer/camera.hpp>
 #include <renderer/envmap.hpp>
@@ -28,12 +27,12 @@ struct mesh_texture {
 
 struct mesh_uniformbind {
     const char *name;
-    bgfx_uniform_handle_t handle;
+    // bgfx_uniform_handle_t handle;
 };
 
 struct mesh_texturebind {
     const char *name;
-    bgfx_texture_handle_t *handle;
+    // bgfx_texture_handle_t *handle;
 };
 
 typedef VECTOR_TYPE(struct mesh_vertex) mesh_vertices_t;
@@ -55,7 +54,7 @@ struct mesh {
     struct resource_gpu *texture_occlusion;
     struct resource_gpu *vbh;
     struct resource_gpu *ibh;
-    bgfx_vertex_layout_t layout;
+    // bgfx_vertex_layout_t layout;
     bool pbr;
 
     const char *basepath;
@@ -71,7 +70,7 @@ struct mesh {
 extern VECTOR_TYPE(struct mesh *) mesh_meshes;
 
 struct mesh *mesh_init(mesh_vertices_t vertices, mesh_indices_t indices, mesh_textures_t textures, bool pbr, const char *basepath);
-void mesh_draw(struct mesh *mesh, struct resource_gpu *program, bgfx_view_id_t view, uint64_t state, glm::mat4 mtx, bool frustumcull, struct camera *camera, bool prepass, struct envmap *env);
+// void mesh_draw(struct mesh *mesh, struct resource_gpu *program, bgfx_view_id_t view, uint64_t state, glm::mat4 mtx, bool frustumcull, struct camera *camera, bool prepass, struct envmap *env);
 void mesh_setup(struct mesh *mesh);
 void mesh_free(struct mesh *mesh);
 

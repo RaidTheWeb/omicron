@@ -42,7 +42,7 @@ namespace OResource {
 
 
         JOB_MUTEXSAFEEARLY(&this->lock);
-        return (struct RPak::stat) { .realsize = SIZE_MAX, .decompressedsize = entry->uncompressedsize, .compressed = false };
+        return (struct RPak::stat) { .realsize = SIZE_MAX, .decompressedsize = SIZE_MAX, .compressed = true };
     found:
     );
         return (struct RPak::stat) { .realsize = entry->compressed ? entry->compressedsize : entry->uncompressedsize, .decompressedsize = entry->uncompressedsize, .compressed = entry->compressed };
@@ -101,11 +101,11 @@ namespace OResource {
                 count++;
                 char dpath[512];
                 char fpath[512];
-                if (counter == 1) {
-                    snprintf(dpath, 512, "%s", dir->d_name);
-                } else {
+                // if (counter == 1) {
+                    // snprintf(dpath, 512, "%s", dir->d_name);
+                // } else {
                     snprintf(dpath, 512, "%s/%s", gdpath, dir->d_name);
-                }
+                // }
                 snprintf(fpath, 512, "%s/%s", path, dir->d_name);
 
                 struct RPak::tableentry entry = { 0 };
@@ -155,11 +155,11 @@ namespace OResource {
 
             } else if (dir->d_type == DT_DIR && strcmp(dir->d_name, ".") && strcmp(dir->d_name, "..")) {
                 char dpath[512];
-                if (counter == 1) {
-                    snprintf(dpath, 256, "%s", dir->d_name);
-                } else {
+                // if (counter == 1) {
+                    // snprintf(dpath, 256, "%s", dir->d_name);
+                // } else {
                     snprintf(dpath, 256, "%s/%s", gdpath, dir->d_name);
-                }
+                // }
                 char fpath[512];
                 snprintf(fpath, 256, "%s/%s", path, dir->d_name);
                 count += listdir(counter - 1, fpath, dpath, tables, tableidx, data, dataidx, datasize);

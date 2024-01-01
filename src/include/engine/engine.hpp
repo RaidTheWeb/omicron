@@ -1,7 +1,6 @@
 #ifndef _ENGINE__ENGINE_HPP
 #define _ENGINE__ENGINE_HPP
 
-#include <bgfx/c99/bgfx.h>
 #include <GLFW/glfw3.h>
 #ifdef __linux__
 #define GLFW_EXPOSE_NATIVE_X11

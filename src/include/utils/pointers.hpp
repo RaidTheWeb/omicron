@@ -51,6 +51,7 @@ namespace OUtils {
             size_t handle = SIZE_MAX;
             ResolutionTable *table = NULL;
 
+            HandlePointer(void) { }
             HandlePointer(ResolutionTable *table, size_t handle) {
                 this->table = table;
                 this->handle = handle;
@@ -65,10 +66,12 @@ namespace OUtils {
             }
 
             T& operator *(void) {
+                ASSERT(this->handle != SIZE_MAX, "Attempted to dereference invalid handle.\n");
                 return *((T *)this->table->get(this->handle));
             }
 
             T *operator ->(void) {
+                ASSERT(this->handle != SIZE_MAX, "Attempted to reference invalid handle.\n");
                 return (T *)this->table->get(this->handle);
             }
     };

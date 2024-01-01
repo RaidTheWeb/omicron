@@ -274,6 +274,11 @@ namespace OVulkan {
 
             uint32_t globalqueuefamily;
             VkQueue globalqueue;
+            uint32_t graphicscomputefamily;
+            VkQueue graphicsqueue;
+            VkQueue computequeue;
+            uint32_t presentfamily;
+            VkQueue presentqueue;
 
             VkSurfaceKHR surface;
             VkSurfaceCapabilitiesKHR surfacecaps;

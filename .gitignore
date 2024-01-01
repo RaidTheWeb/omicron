@@ -8,6 +8,7 @@ pk2/
 temp/
 textures/
 **.so
+**.so.**
 **.o
 **.glb
 **.obj

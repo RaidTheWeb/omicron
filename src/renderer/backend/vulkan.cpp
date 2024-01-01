@@ -422,8 +422,8 @@ namespace OVulkan {
         submitinfo.commandBufferCount = 1;
         submitinfo.pCommandBuffers = &cmd;
 
-        vkQueueSubmit(this->globalqueue, 1, &submitinfo, VK_NULL_HANDLE);
-        vkQueueWaitIdle(this->globalqueue);
+        vkQueueSubmit(this->graphicsqueue, 1, &submitinfo, VK_NULL_HANDLE);
+        vkQueueWaitIdle(this->graphicsqueue);
 
         vkFreeCommandBuffers(this->dev, this->cmdpool, 1, &cmd);
     }
@@ -1674,9 +1674,14 @@ namespace OVulkan {
         swapcreate.imageExtent = this->surfacecaps.currentExtent;
         swapcreate.imageArrayLayers = 1;
         swapcreate.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-        swapcreate.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        swapcreate.queueFamilyIndexCount = 1;
-        swapcreate.pQueueFamilyIndices = &this->globalqueuefamily;
+        uint32_t indices[2] = { this->graphicscomputefamily, this->presentfamily };
+        if (this->graphicscomputefamily != this->presentfamily) {
+            swapcreate.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+            swapcreate.queueFamilyIndexCount = 2;
+            swapcreate.pQueueFamilyIndices = indices;
+        } else {
+            swapcreate.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        }
         swapcreate.preTransform = this->surfacecaps.currentTransform;
         swapcreate.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         // swapcreate.presentMode = VK_PRESENT_MODE_MAILBOX_KHR; // we want to use mailbox as much as possible in order to reduce stuttering, latency, and all other related issues.
@@ -1823,7 +1828,6 @@ namespace OVulkan {
             if (vktexture.flags & VULKAN_TEXTURESWAPCHAIN) {
                 continue;
             } else {
-                printf("destroy image\n");
                 vmaDestroyImage(this->allocator, vktexture.image, vktexture.allocation);
             }
         }
@@ -2000,7 +2004,42 @@ namespace OVulkan {
         // TODO: Score based system for picking GPU based on supported extensions?
         for (size_t i = 0; i < sizeof(devextensions) / sizeof(devextensions[0]); i++) {
             ASSERT(devextensions[i].optional || devextensions[i].supported, "Required Vulkan extension %s is not present when needed by the Omicron Vulkan backend.\n", devextensions[i].name);
+        }  
+
+#ifdef __linux__
+        res = VK_ERROR_INITIALIZATION_FAILED;
+        if (vkCreateXlibSurfaceKHR != NULL) {
+            VkXlibSurfaceCreateInfoKHR surfacecreate = { };
+            surfacecreate.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
+            surfacecreate.pNext = NULL;
+            surfacecreate.flags = 0;
+            surfacecreate.dpy = (Display *)init->platform.ndt;
+            surfacecreate.window = (Window)init->platform.nwh;
+            res = vkCreateXlibSurfaceKHR(this->instance, &surfacecreate, NULL, &this->surface);
         }
+
+        if (res != VK_SUCCESS) {
+            void *xcblib = dlopen("libX11-xcb.so.1", RTLD_NOW);
+
+            if (xcblib != NULL && vkCreateXcbSurfaceKHR != NULL) {
+                VkXcbSurfaceCreateInfoKHR surfacecreate = { };
+                surfacecreate.sType = VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR;
+                surfacecreate.pNext = NULL;
+                surfacecreate.flags = 0;
+                typedef xcb_connection_t *(*PFN_XGetXCBConnection)(Display *);
+                PFN_XGetXCBConnection getconnection = (PFN_XGetXCBConnection)dlsym(xcblib, "XGetXCBConnection");
+                surfacecreate.connection = getconnection((Display *)init->platform.ndt);
+                union {
+                    void *ptr;
+                    xcb_window_t window;
+                } cast = { init->platform.nwh };
+                surfacecreate.window = cast.window;
+                res = vkCreateXcbSurfaceKHR(this->instance, &surfacecreate, NULL, &this->surface);
+                dlclose(xcblib);
+            }
+        }
+#endif
+        ASSERT(res == VK_SUCCESS, "Failed to create Vulkan surface %d.\n", res);
 
         uint32_t queuefamilycount = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(this->phy, &queuefamilycount, NULL);
@@ -2010,25 +2049,42 @@ namespace OVulkan {
 
         for (size_t i = 0; i < queuefamilycount; i++) {
             VkQueueFamilyProperties *props = &queueprops[i];
-            if (props->queueFlags & (VK_QUEUE_COMPUTE_BIT | VK_QUEUE_GRAPHICS_BIT)) { // find a queue that offers what we want
-                this->globalqueuefamily = i;
+            if ((props->queueFlags & VK_QUEUE_GRAPHICS_BIT) && (props->queueFlags & VK_QUEUE_COMPUTE_BIT)) { // find a queue that offers what we want
+                // this->globalqueuefamily = i;
+                this->graphicscomputefamily = i;
             }
-        }
 
+            VkBool32 presentsupported = VK_FALSE;
+            res = vkGetPhysicalDeviceSurfaceSupportKHR(this->phy, i, this->surface, &presentsupported);
+            ASSERT(res == VK_SUCCESS, "Failed to gather support information on queue family %lu\n", i);
+
+            if (presentsupported) {
+                this->presentfamily = i;
+            }
+            
+        }
         free(queueprops);
 
-        VkDeviceQueueCreateInfo queuecreate = { };
-        queuecreate.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queuecreate.pNext = NULL;
-        queuecreate.queueFamilyIndex = this->globalqueuefamily;
-        queuecreate.queueCount = 1;
         float queueprio = 1.0f;
-        queuecreate.pQueuePriorities = &queueprio;
+        VkDeviceQueueCreateInfo queuecreate[2];
+        queuecreate[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queuecreate[0].pNext = NULL;
+        queuecreate[0].queueCount = 1;
+        queuecreate[0].queueFamilyIndex = this->graphicscomputefamily;
+        queuecreate[0].pQueuePriorities = &queueprio;
+        queuecreate[0].flags = 0;
+
+        queuecreate[1].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queuecreate[1].pNext = NULL;
+        queuecreate[1].queueCount = 1;
+        queuecreate[1].queueFamilyIndex = this->presentfamily;
+        queuecreate[1].pQueuePriorities = &queueprio;
+        queuecreate[1].flags = 0;
 
         VkDeviceCreateInfo devicecreate = { };
         devicecreate.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        devicecreate.pQueueCreateInfos = &queuecreate;
-        devicecreate.queueCreateInfoCount = 1;
+        devicecreate.pQueueCreateInfos = queuecreate;
+        devicecreate.queueCreateInfoCount = 2;
         devicecreate.pEnabledFeatures = &this->phyfeatures;
         devicecreate.enabledExtensionCount = sizeof(devextensions) / sizeof(devextensions[0]);
 
@@ -2074,46 +2130,9 @@ namespace OVulkan {
         alloccreate.pVulkanFunctions = &this->vmafunctions;
         vmaCreateAllocator(&alloccreate, &this->allocator);
 
-        vkGetDeviceQueue(this->dev, this->globalqueuefamily, 0, &this->globalqueue);
-
-#ifdef __linux__
-        res = VK_ERROR_INITIALIZATION_FAILED;
-        if (vkCreateXlibSurfaceKHR != NULL) {
-            VkXlibSurfaceCreateInfoKHR surfacecreate = { };
-            surfacecreate.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
-            surfacecreate.pNext = NULL;
-            surfacecreate.flags = 0;
-            surfacecreate.dpy = (Display *)init->platform.ndt;
-            surfacecreate.window = (Window)init->platform.nwh;
-            res = vkCreateXlibSurfaceKHR(this->instance, &surfacecreate, NULL, &this->surface);
-        }
-
-        if (res != VK_SUCCESS) {
-            void *xcblib = dlopen("libX11-xcb.so.1", RTLD_NOW);
-
-            if (xcblib != NULL && vkCreateXcbSurfaceKHR != NULL) {
-                VkXcbSurfaceCreateInfoKHR surfacecreate = { };
-                surfacecreate.sType = VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR;
-                surfacecreate.pNext = NULL;
-                surfacecreate.flags = 0;
-                typedef xcb_connection_t *(*PFN_XGetXCBConnection)(Display *);
-                PFN_XGetXCBConnection getconnection = (PFN_XGetXCBConnection)dlsym(xcblib, "XGetXCBConnection");
-                surfacecreate.connection = getconnection((Display *)init->platform.ndt);
-                union {
-                    void *ptr;
-                    xcb_window_t window;
-                } cast = { init->platform.nwh };
-                surfacecreate.window = cast.window;
-                res = vkCreateXcbSurfaceKHR(this->instance, &surfacecreate, NULL, &this->surface);
-                dlclose(xcblib);
-            }
-        }
-#endif
-        ASSERT(res == VK_SUCCESS, "Failed to create Vulkan surface %d.\n", res);
-
-        VkBool32 supportspresent;
-        res = vkGetPhysicalDeviceSurfaceSupportKHR(this->phy, this->globalqueuefamily, this->surface, &supportspresent);
-        ASSERT(res == VK_SUCCESS && supportspresent, "Surface presentation is not supported.\n");
+        vkGetDeviceQueue(this->dev, this->graphicscomputefamily, 0, &this->graphicsqueue);
+        vkGetDeviceQueue(this->dev, this->graphicscomputefamily, 0, &this->computequeue);
+        vkGetDeviceQueue(this->dev, this->presentfamily, 0, &this->presentqueue);
 
         uint32_t formatcount = 0;
         vkGetPhysicalDeviceSurfaceFormatsKHR(this->phy, this->surface, &formatcount, NULL);
@@ -2127,7 +2146,7 @@ namespace OVulkan {
         VkCommandPoolCreateInfo poolcreate = { };
         poolcreate.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         poolcreate.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        poolcreate.queueFamilyIndex = this->globalqueuefamily;
+        poolcreate.queueFamilyIndex = this->graphicscomputefamily;
 
         res = vkCreateCommandPool(this->dev, &poolcreate, NULL, &this->cmdpool);
         ASSERT(res == VK_SUCCESS, "Failed to create Vulkan command pool %d.\n", res);
@@ -2226,7 +2245,7 @@ namespace OVulkan {
         submit.signalSemaphoreCount = 1;
         submit.pSignalSemaphores = signalsems; // signal render done when we're done
 
-        res = vkQueueSubmit(this->globalqueue, 1, &submit, this->framesinflight[this->frame]); // do all this and trigger the frameinflight fence to we know we can go ahead and render the next frame when we're done with the command buffers
+        res = vkQueueSubmit(this->graphicsqueue, 1, &submit, this->framesinflight[this->frame]); // do all this and trigger the frameinflight fence to we know we can go ahead and render the next frame when we're done with the command buffers
         ASSERT(res == VK_SUCCESS, "Failed to submit Vulkan queue %d.\n", res);
 
         VkPresentInfoKHR presentinfo = { };
@@ -2245,7 +2264,7 @@ namespace OVulkan {
         // vulkan_transitionlayout(cmd, &vulkan_textures[this->swaptextures[image].handle].vkresource, RENDERER_FORMATBGRA8, RENDERER_LAYOUTBACKBUFFER);
         // vulkan_resourcemutex.unlock();
         this->endonetimecmd(cmd);
-        res = vkQueuePresentKHR(this->globalqueue, &presentinfo); // blit queue to swapchains
+        res = vkQueuePresentKHR(this->presentqueue, &presentinfo); // blit queue to swapchains
         if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
             // vulkan_recreateswap();
             vkDeviceWaitIdle(this->dev); // wait until all work is done!

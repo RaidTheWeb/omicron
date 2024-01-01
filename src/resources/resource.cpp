@@ -1,12 +1,36 @@
 #include <concurrency/job.hpp>
 #include <pthread.h>
 #include <resources/resource.hpp>
+#include <utils/hash.hpp>
 
+// custom format for models (animations, etc.)
+// KTX for textures
 
+namespace OResource {
+    ResourceManager manager;
 
+    void ResourceManager::loadrpak(RPak *rpak) {
+        for (size_t i = 0; i < rpak->header.num; i++) {
+            Resource *res = new Resource(rpak, rpak->entries[i].path);
+            res->rpakentry = rpak->entries[i];
+            this->resources[OUtils::fnv1a(rpak->entries[i].path, strlen(rpak->entries[i].path), FNV1A_SEED)] = res;
+        }
+    }
 
+    void ResourceManager::create(const char *path) {
+        this->resources[OUtils::fnv1a(path, strlen(path), FNV1A_SEED)] = new Resource(path);
+    }
 
+    void ResourceManager::create(const char *path, void *src) {
+        this->resources[OUtils::fnv1a(path, strlen(path), FNV1A_SEED)] = new Resource(path, src);
+    }
 
+    Resource *ResourceManager::get(const char *path) {
+        auto res = this->resources.find(OUtils::fnv1a(path, strlen(path), FNV1A_SEED));
+        ASSERT(res != this->resources.end(), "No resource registered as %s\n", path);
+        return res->second;
+    }
+}
 
 // struct resource_ring *resource_gpuresources = NULL;
 //

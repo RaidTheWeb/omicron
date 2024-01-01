@@ -11,15 +11,12 @@ CC = gcc
 CXX = g++
 CFLAGS = -g -std=gnu++17 -I$(SOURCE_DIR)/include -I$(SOURCE_DIR)/ \
 		 -Ilibs/glm/ \
-		 -Ilibs/bgfx/include \
-		 -Ilibs/bx/include \
 		 -Ilibs/KTX-Software/include \
-		 -Ilibs/meshoptimizer/src \
-		 -Ilibs/luajit/src \
+		 -Ilibs/glfw/include \
+		 -Ilibs/assimp/include \
 		 -Lrt/ \
 		 -DOMICRON_VERSION=$(VERSION)
 		 # -Llibs/meshoptimizer/build \
-		 # -Llibs/bgfx/.build/linux64_gcc/bin/
 
 # bgfx needs to be compiled with the shared library copied to /usr/lib (or whatever else is the main path for libraries)
 LDFLAGS = -lglfw \
@@ -30,8 +27,6 @@ LDFLAGS = -lglfw \
 		  -lX11 \
 		  -lGL \
 		  -lm \
-		  -lmeshoptimizer \
-		  -lluajit
 
 HEADERS = $(shell find $(SOURCE_DIR)/include -type f -name '*.hpp')
 SOURCES = $(shell find $(SOURCE_DIR) -type f -name '*.cpp')
@@ -48,50 +43,26 @@ OBJECTS = $(SOURCES:.cpp=.o)
 # SOURCES = $(shell cd '$(call MKESCAPE,$(SOURCE_DIR))/' && find -L * -type f -name '*.c')
 # OBJECTS = $(addprefix $(call MKESCAPE,$(BUILD_DIR))/,$(SOURCES:.c=.o))
 
-SHADER_DIR = assets/shaders
-SHADERS = $(shell find $(SHADER_DIR)/* -maxdepth 1 | grep -E ".*/(vs|fs|cs).*.sc")
-SHADEROBJS = $(SHADERS:.sc=.bin)
-SHADERC = libs/bgfx/.build/linux64_gcc/bin/shadercRelease
-SHADERPLATFORM ?= linux
 OMICRON_RENDERBACKEND ?= vulkan
 ifeq ($(strip $(OMICRON_RENDERBACKEND)), vulkan)
-SHADERPROFILE ?= spirv
 CFLAGS += -DOMICRON_RENDERVULKAN=1
 else ifeq ($(strip $(OMICRON_RENDERBACKEND)), opengl)
-SHADERPROFILE ?= 430
 CFLAGS += -DOMICRON_RENDEROPENGL=1
 endif
 
 # CFLAGS += -DOMICRON_RENDERBACKENDBGFX=1
-LDFLAGS += -lbgfx
 
 CFLAGS += -DOMICRON_RENDERBACKENDVULKAN=1
 
-.PHONY: clean
+.PHONY: clean utils
 
-all: shaders symbols $(BIN_DIR)/$(OUT)
-
-shaders: $(SHADEROBJS)
-
-%.bin: %.sc
-	$(SHADERC) --type $(shell echo $(notdir $@) | cut -c 1) \
-		-i libs/bgfx/src \
-			--platform $(SHADERPLATFORM) \
-			-p $(SHADERPROFILE) \
-			--varyingdef $(dir $@)varying.def.sc \
-			-f $< \
-			-O3 \
-			-o $@
-
-symbols: $(HEADERS)
-	@python3 parsesymbols.py $(HEADERS)
-
-# run with mangohud
-run-stat: $(BIN_DIR)/$(OUT)
-	@mangohud --dlsym $(BIN_DIR)/$(OUT)
+all: $(BIN_DIR)/$(OUT)
 
 run: shaders $(BIN_DIR)/$(OUT)
 	@$(BIN_DIR)/$(OUT)
+
+utils:
+	@$(CC) -o utils/rpak utils/rpak.c -lz
 
 $(BIN_DIR)/$(OUT): $(OBJECTS)
 	@printf "%8s %-40s %s %s\n" $(CXX) $@ "$(CFLAGS)" "$(LDFLAGS)"
@@ -113,4 +84,3 @@ clean:
 	rm -r bin
 	# rm -r build
 	rm -r $(OBJECTS)
-	rm -r $(shell find $(SHADER_DIR)/* -maxdepth 1 | grep -E ".*/(vs|fs|cs).*.bin")
