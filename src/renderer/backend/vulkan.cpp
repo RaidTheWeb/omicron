@@ -52,6 +52,7 @@ namespace OVulkan {
         VK_FORMAT_R8_SINT,
         VK_FORMAT_R8_UINT,
         VK_FORMAT_R8_SNORM,
+        VK_FORMAT_R8_SRGB,
 
         VK_FORMAT_R16_UNORM,
         VK_FORMAT_R16_SINT,
@@ -67,6 +68,7 @@ namespace OVulkan {
         VK_FORMAT_R8G8_SINT,
         VK_FORMAT_R8G8_UINT,
         VK_FORMAT_R8G8_SNORM,
+        VK_FORMAT_R8G8_SRGB,
 
         VK_FORMAT_R16G16_UNORM,
         VK_FORMAT_R16G16_SINT,
@@ -80,6 +82,7 @@ namespace OVulkan {
         VK_FORMAT_R8G8B8_SINT,
         VK_FORMAT_R8G8B8_UINT,
         VK_FORMAT_R8G8B8_SNORM,
+        VK_FORMAT_R8G8B8_SRGB,
 
         VK_FORMAT_R16G16B16_UNORM,
         VK_FORMAT_R16G16B16_SINT,
@@ -93,11 +96,13 @@ namespace OVulkan {
         VK_FORMAT_B8G8R8A8_SINT,
         VK_FORMAT_B8G8R8A8_UINT,
         VK_FORMAT_B8G8R8A8_SNORM,
+        VK_FORMAT_B8G8R8A8_SRGB,
 
         VK_FORMAT_R8G8B8A8_UNORM,
         VK_FORMAT_R8G8B8A8_SINT,
         VK_FORMAT_R8G8B8A8_UINT,
         VK_FORMAT_R8G8B8A8_SNORM,
+        VK_FORMAT_R8G8B8A8_SRGB,
 
         VK_FORMAT_R16G16B16A16_UNORM,
         VK_FORMAT_R16G16B16A16_SINT,
@@ -1460,7 +1465,7 @@ namespace OVulkan {
             return ORenderer::RESULT_INVALIDARG;
         }
 
-        info->format = ORenderer::FORMAT_BGRA8; // XXX: Return selected swapchain format (based on support)
+        info->format = ORenderer::FORMAT_BGRA8SRGB; // XXX: Return selected swapchain format (based on support)
         info->width = this->surfacecaps.currentExtent.width;
         info->height = this->surfacecaps.currentExtent.height;
 
@@ -1669,7 +1674,7 @@ namespace OVulkan {
         swapcreate.pNext = NULL;
         swapcreate.surface = this->surface;
         swapcreate.minImageCount = this->surfacecaps.minImageCount + 1;
-        swapcreate.imageFormat = VK_FORMAT_B8G8R8A8_UNORM;
+        swapcreate.imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
         swapcreate.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
         swapcreate.imageExtent = this->surfacecaps.currentExtent;
         swapcreate.imageArrayLayers = 1;
@@ -1734,7 +1739,7 @@ namespace OVulkan {
             this->resourcemutex.unlock();
 
             struct ORenderer::textureviewdesc viewdesc = { };
-            viewdesc.format = ORenderer::FORMAT_BGRA8; // that's the format our swapchain comes in (XXX: Handle this properly)
+            viewdesc.format = ORenderer::FORMAT_BGRA8SRGB; // that's the format our swapchain comes in (XXX: Handle this properly)
             viewdesc.texture = this->swaptextures[i];
             viewdesc.type = ORenderer::IMAGETYPE_2D;
             viewdesc.aspect = ORenderer::ASPECT_COLOUR;
@@ -2004,7 +2009,7 @@ namespace OVulkan {
         // TODO: Score based system for picking GPU based on supported extensions?
         for (size_t i = 0; i < sizeof(devextensions) / sizeof(devextensions[0]); i++) {
             ASSERT(devextensions[i].optional || devextensions[i].supported, "Required Vulkan extension %s is not present when needed by the Omicron Vulkan backend.\n", devextensions[i].name);
-        }  
+        }
 
 #ifdef __linux__
         res = VK_ERROR_INITIALIZATION_FAILED;
@@ -2061,7 +2066,7 @@ namespace OVulkan {
             if (presentsupported) {
                 this->presentfamily = i;
             }
-            
+
         }
         free(queueprops);
 

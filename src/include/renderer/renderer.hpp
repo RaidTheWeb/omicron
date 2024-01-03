@@ -227,6 +227,7 @@ namespace ORenderer {
         FORMAT_R8I,
         FORMAT_R8U,
         FORMAT_R8S,
+        FORMAT_R8SRGB,
 
         FORMAT_R16,
         FORMAT_R16I,
@@ -242,6 +243,7 @@ namespace ORenderer {
         FORMAT_RG8I,
         FORMAT_RG8U,
         FORMAT_RG8S,
+        FORMAT_RG8SRGB,
 
         FORMAT_RG16,
         FORMAT_RG16I,
@@ -255,6 +257,7 @@ namespace ORenderer {
         FORMAT_RGB8I,
         FORMAT_RGB8U,
         FORMAT_RGB8S,
+        FORMAT_RGB8SRGB,
 
         FORMAT_RGB16,
         FORMAT_RGB16I,
@@ -268,11 +271,13 @@ namespace ORenderer {
         FORMAT_BGRA8I,
         FORMAT_BGRA8U,
         FORMAT_BGRA8S,
+        FORMAT_BGRA8SRGB,
 
         FORMAT_RGBA8,
         FORMAT_RGBA8I,
         FORMAT_RGBA8U,
         FORMAT_RGBA8S,
+        FORMAT_RGBA8SRGB,
 
         FORMAT_RGBA16,
         FORMAT_RGBA16I,
