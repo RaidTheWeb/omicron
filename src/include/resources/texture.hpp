@@ -82,12 +82,91 @@ namespace OResource {
                 }
             }
 
+            static struct ORenderer::texture loadfromdata(struct ORenderer::texturedesc *desc, uint8_t *data, size_t size) {
+                struct ORenderer::bufferdesc stagingdesc = { };
+                stagingdesc.size = size;
+                stagingdesc.usage = ORenderer::BUFFER_TRANSFERSRC;
+                stagingdesc.memprops = ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPUCOHERENT | ORenderer::MEMPROP_CPUSEQUENTIALWRITE;
+                stagingdesc.flags = 0;
+                struct ORenderer::buffer staging = { };
+                ASSERT(ORenderer::context->createbuffer(&stagingdesc, &staging) == ORenderer::RESULT_SUCCESS, "Failed to create staging buffer.\n");
+
+                struct ORenderer::buffermapdesc stagingmapdesc = { };
+                stagingmapdesc.buffer = staging;
+                stagingmapdesc.size = size;
+                stagingmapdesc.offset = 0;
+                struct ORenderer::buffermap stagingmap = { };
+                ASSERT(ORenderer::context->mapbuffer(&stagingmapdesc, &stagingmap) == ORenderer::RESULT_SUCCESS, "Failed to map staging buffer.\n");
+                memcpy(stagingmap.mapped[0], data, size);
+                ORenderer::context->unmapbuffer(stagingmap);
+
+                ORenderer::Stream stream;
+                struct ORenderer::bufferimagecopy region = { };
+                region.offset = 0;
+                region.rowlen = 0;
+                region.imgheight = 0;
+                region.imgoff = { 0, 0, 0 };
+                region.imgextent = { desc->width, desc->height, desc->depth };
+                region.aspect = ORenderer::ASPECT_COLOUR;
+                region.mip = 0;
+                region.baselayer = 0;
+                region.layercount = desc->layers;
+
+                struct ORenderer::texture texture;
+
+                ORenderer::context->createtexture(desc, &texture);
+
+                stream.transitionlayout(texture, desc->format, ORenderer::LAYOUT_TRANSFERDST);
+                stream.copybufferimage(region, staging, texture);
+                stream.transitionlayout(texture, desc->format, ORenderer::LAYOUT_SHADERRO);
+
+                ORenderer::context->submitstream(&stream);
+
+                ORenderer::context->destroybuffer(&staging);
+                return texture;
+            }
+
             static struct ORenderer::texture load(Resource *resource) {
                 struct ORenderer::texture texture;
                 switch (resource->type) {
-                    case Resource::SOURCE_RPAK:
+                    case Resource::SOURCE_RPAK: {
+                        struct RPak::tableentry entry = resource->rpakentry;
+                        uint8_t *buffer = (uint8_t *)malloc(entry.uncompressedsize);
+                        ASSERT(resource->rpak->read(resource->path, buffer, entry.uncompressedsize, 0) > 0, "Failed to read RPak file.\n");
+                        ktxTexture *ktxtexture;
+                        KTX_error_code res = ktxTexture_CreateFromMemory(buffer, entry.uncompressedsize, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxtexture);
+                        ASSERT(res == KTX_SUCCESS, "Failed to create KTX texture from RPak file %u.\n", res);
+                        ASSERT(ktxtexture->classId == ktxTexture2_c, "KTX file must be KTX2.\n");
+
+                        ktx_uint8_t *data = ktxTexture_GetData(ktxtexture);
+                        struct ORenderer::texturedesc desc = { };
+                        ASSERT(ktxtexture->numDimensions == 3 ? ktxtexture->isArray == false : true, "3D image cannot be an array.\n");
+                        desc.type = ktxtexture->isCubemap ? ktxtexture->isArray ? ORenderer::IMAGETYPE_CUBEARRAY : ORenderer::IMAGETYPE_CUBE :
+                            ktxtexture->numDimensions == 1 ? ktxtexture->isArray ? ORenderer::IMAGETYPE_1DARRAY : ORenderer::IMAGETYPE_1D :
+                            ktxtexture->numDimensions == 2 ? ktxtexture->isArray ? ORenderer::IMAGETYPE_2DARRAY : ORenderer::IMAGETYPE_2D :
+                            ktxtexture->numDimensions == 3 ? ORenderer::IMAGETYPE_3D :
+                            UINT8_MAX;
+                        ASSERT(desc.type != UINT8_MAX, "Unsupported KTX2 format.\n");
+                        desc.width = ktxtexture->baseWidth;
+                        desc.height = ktxtexture->baseHeight;
+                        desc.depth = ktxtexture->baseDepth;
+                        desc.mips = ktxtexture->numLevels;
+                        desc.layers = ktxtexture->isCubemap ? 6 : ktxtexture->numLayers;
+                        desc.samples = ORenderer::SAMPLE_X1;
+                        // we assume KTX2 for everything
+                        desc.format = convertformat(((ktxTexture2 *)ktxtexture)->vkFormat);
+                        desc.memlayout = ORenderer::MEMLAYOUT_OPTIMAL;
+                        desc.usage = ORenderer::USAGE_SAMPLED | ORenderer::USAGE_DST;
+                        texture = loadfromdata(&desc, data, ktxtexture->dataSize);
+
+                        char text[256];
+                        sprintf(text, "RPak KTX2 Texture %s", basename(resource->path));
+                        ORenderer::context->setdebugname(texture, text);
+                        ktxTexture_Destroy(ktxtexture);
+                        free(buffer);
 
                         break;
+                    }
                     case Resource::SOURCE_VIRTUAL:
                         break;
                     case Resource::SOURCE_OSFS: {
@@ -95,7 +174,7 @@ namespace OResource {
                         KTX_error_code res = ktxTexture_CreateFromNamedFile(resource->path, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxtexture);
 
                         ASSERT(res == KTX_SUCCESS, "Failed to create KTX texture from file %u.\n", res);
-                        ASSERT(ktxtexture->classId == ktxTexture2_c, "KTX file must be KTX2\n");
+                        ASSERT(ktxtexture->classId == ktxTexture2_c, "KTX file must be KTX2.\n");
 
                         // XXX: Stream this in instead of just shoving it into VRAM immediately
                         ktx_uint8_t *data = ktxTexture_GetData(ktxtexture);
@@ -116,9 +195,13 @@ namespace OResource {
                         // we assume KTX2 for everything
                         desc.format = convertformat(((ktxTexture2 *)ktxtexture)->vkFormat);
                         desc.memlayout = ORenderer::MEMLAYOUT_OPTIMAL;
-                        desc.usage = ORenderer::USAGE_SAMPLED;
+                        desc.usage = ORenderer::USAGE_SAMPLED | ORenderer::USAGE_DST;
+                        texture = loadfromdata(&desc, data, ktxtexture->dataSize);
+
+                        char text[256];
+                        sprintf(text, "OSFS KTX2 Texture %s", basename(resource->path));
+                        ORenderer::context->setdebugname(texture, text);
                         ktxTexture_Destroy(ktxtexture);
-                        printf("%ux%ux%u (%u mips, type %u), format %u\n", desc.width, desc.height, desc.depth, desc.mips, desc.type, desc.format);
                         break;
                     }
                 }

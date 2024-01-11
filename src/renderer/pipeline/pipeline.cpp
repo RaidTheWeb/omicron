@@ -2,6 +2,8 @@
 
 #include <renderer/pipeline/pbrpipeline.hpp>
 #include <renderer/renderer.hpp>
+#include <renderer/mesh.hpp>
+#include <resources/texture.hpp>
 
 struct ORenderer::pipelinestate state;
 struct ORenderer::renderpass rpass;
@@ -14,6 +16,10 @@ struct ORenderer::textureview texview = { };
 struct ORenderer::texture depthtex = { };
 struct ORenderer::textureview depthtexview = { };
 struct ORenderer::buffermap ubomap = { };
+struct ORenderer::texture outtex = { };
+struct ORenderer::textureview outtexview = { };
+struct ORenderer::sampler outsampler = { };
+ORenderer::Model model;
 
 struct ubo {
     glm::mat4 model;
@@ -53,7 +59,7 @@ static uint16_t indices[] = {
 struct ORenderer::rect renderrect = { 0, 0, 1280, 720 };
 
 void PBRPipeline::init(void) {
-    ORenderer::Shader stages[2] = { ORenderer::Shader("test.vert.spv", ORenderer::SHADER_VERTEX), ORenderer::Shader("test.frag.spv", ORenderer::SHADER_FRAGMENT) };
+    ORenderer::Shader stages[2] = { ORenderer::Shader("shaders/test.vert.spv", ORenderer::SHADER_VERTEX), ORenderer::Shader("shaders/test.frag.spv", ORenderer::SHADER_FRAGMENT) };
 
     struct ORenderer::blendattachmentdesc attachment = { };
     attachment.writemask = ORenderer::WRITE_RGBA;
@@ -67,13 +73,7 @@ void PBRPipeline::init(void) {
 
     struct ORenderer::vtxbinddesc bind = { };
     bind.rate = ORenderer::RATE_VERTEX;
-    bind.layout = { .stride = sizeof(struct vertex), .binding = 0, .attribcount = 3, .attribs = { } };
-    bind.layout.attribs[0].offset = offsetof(struct vertex, pos);
-    bind.layout.attribs[0].attribtype = ORenderer::VTXATTRIB_VEC3;
-    bind.layout.attribs[1].offset = offsetof(struct vertex, colour);
-    bind.layout.attribs[1].attribtype = ORenderer::VTXATTRIB_VEC3;
-    bind.layout.attribs[2].offset = offsetof(struct vertex, texcoord);
-    bind.layout.attribs[2].attribtype = ORenderer::VTXATTRIB_VEC2;
+    bind.layout = ORenderer::Mesh::getlayout(0);
 
     struct ORenderer::vtxinputdesc vtxinput = { };
     vtxinput.bindcount = 1;
@@ -142,6 +142,11 @@ void PBRPipeline::init(void) {
     resource.stages = ORenderer::STAGE_VERTEX;
     resource.type = ORenderer::RESOURCE_UNIFORM;
 
+    struct ORenderer::pipelinestateresourcedesc samplerresource = { };
+    samplerresource.binding = 1;
+    samplerresource.stages = ORenderer::STAGE_FRAGMENT;
+    samplerresource.type = ORenderer::RESOURCE_SAMPLER;
+
     struct ORenderer::depthstencilstatedesc depthstencildesc = { };
     depthstencildesc.stencil = false;
     depthstencildesc.depthtest = true;
@@ -150,6 +155,10 @@ void PBRPipeline::init(void) {
     depthstencildesc.depthwrite = true;
     depthstencildesc.depthboundstest = false;
     depthstencildesc.depthcompareop = ORenderer::CMPOP_LESS;
+
+    struct ORenderer::pipelinestateresourcedesc resources[2];
+    resources[0] = resource;
+    resources[1] = samplerresource;
 
     struct ORenderer::pipelinestatedesc desc = { };
     desc.stagecount = 2;
@@ -165,8 +174,8 @@ void PBRPipeline::init(void) {
     // desc.depthstencil = &depthstencildesc;
     desc.depthstencil = NULL;
     desc.multisample = &multisample;
-    desc.resources = &resource;
-    desc.resourcecount = 1;
+    desc.resources = resources;
+    desc.resourcecount = 2;
 
     ASSERT(ORenderer::context->createpipelinestate(&desc, &state) == ORenderer::RESULT_SUCCESS, "Failed to create pipeline state.\n");
 
@@ -227,63 +236,65 @@ void PBRPipeline::init(void) {
     // fbdesc.attachments = fbattachments;
     // ASSERT(renderer_context->createframebuffer(&fbdesc, &fb) == RENDERER_RESULTSUCCESS, "Failed to create framebuffer.\n");
 
-    struct ORenderer::bufferdesc bufferdesc = { };
-    bufferdesc.size = sizeof(vertices);
-    bufferdesc.usage = ORenderer::BUFFER_VERTEX | ORenderer::BUFFER_TRANSFERDST;
-    bufferdesc.memprops = ORenderer::MEMPROP_GPULOCAL;
-    ASSERT(ORenderer::context->createbuffer(&bufferdesc, &buffer) == ORenderer::RESULT_SUCCESS, "Failed to create buffer.\n");
+    model = ORenderer::Model("misc/model.glb", ORenderer::Model::IMPORT_OPTIMISE);
 
-    struct ORenderer::bufferdesc stagingdesc = { };
-    stagingdesc.size = sizeof(vertices);
-    stagingdesc.usage = ORenderer::BUFFER_TRANSFERSRC;
-    stagingdesc.memprops = ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPUCOHERENT | ORenderer::MEMPROP_CPUSEQUENTIALWRITE;
-    stagingdesc.flags = 0;
-    struct ORenderer::buffer staging = { };
-    ASSERT(ORenderer::context->createbuffer(&stagingdesc, &staging) == ORenderer::RESULT_SUCCESS, "Failed to create staging buffer.\n");
-
-    struct ORenderer::buffermapdesc stagingmapdesc = { };
-    stagingmapdesc.buffer = staging;
-    stagingmapdesc.size = sizeof(vertices);
-    stagingmapdesc.offset = 0;
-    struct ORenderer::buffermap stagingmap = { };
-    ASSERT(ORenderer::context->mapbuffer(&stagingmapdesc, &stagingmap) == ORenderer::RESULT_SUCCESS, "failed to map staging buffer.\n");
-    memcpy(stagingmap.mapped[0], vertices, sizeof(vertices));
-    ORenderer::context->unmapbuffer(stagingmap);
-
-    struct ORenderer::buffercopydesc buffercopy = { };
-    buffercopy.src = staging;
-    buffercopy.dst = buffer;
-    buffercopy.srcoffset = 0;
-    buffercopy.dstoffset = 0;
-    buffercopy.size = sizeof(vertices);
-    ORenderer::context->copybuffer(&buffercopy);
-
-    ORenderer::context->destroybuffer(&staging); // destroy so we can recreate it
-
-    bufferdesc.size = sizeof(indices);
-    bufferdesc.usage = ORenderer::BUFFER_INDEX | ORenderer::BUFFER_TRANSFERDST;
-    bufferdesc.memprops = ORenderer::MEMPROP_GPULOCAL;
-    ASSERT(ORenderer::context->createbuffer(&bufferdesc, &idxbuffer) == ORenderer::RESULT_SUCCESS, "Failed to create buffer.\n");
-
-    stagingdesc.size = sizeof(indices);
-    stagingdesc.usage = ORenderer::BUFFER_TRANSFERSRC;
-    stagingdesc.memprops = ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPUCOHERENT | ORenderer::MEMPROP_CPUSEQUENTIALWRITE;
-    stagingdesc.flags = 0;
-    ASSERT(ORenderer::context->createbuffer(&stagingdesc, &staging) == ORenderer::RESULT_SUCCESS, "Failed to create staging buffer.\n");
-
-    stagingmapdesc.buffer = staging;
-    stagingmapdesc.size = sizeof(indices);
-    stagingmapdesc.offset = 0;
-    ASSERT(ORenderer::context->mapbuffer(&stagingmapdesc, &stagingmap) == ORenderer::RESULT_SUCCESS, "failed to map staging buffer.\n");
-    memcpy(stagingmap.mapped[0], indices, sizeof(indices));
-    ORenderer::context->unmapbuffer(stagingmap);
-
-    buffercopy.src = staging;
-    buffercopy.dst = idxbuffer;
-    buffercopy.srcoffset = 0;
-    buffercopy.dstoffset = 0;
-    buffercopy.size = sizeof(indices);
-    ORenderer::context->copybuffer(&buffercopy);
+    // struct ORenderer::bufferdesc bufferdesc = { };
+    // bufferdesc.size = sizeof(vertices);
+    // bufferdesc.usage = ORenderer::BUFFER_VERTEX | ORenderer::BUFFER_TRANSFERDST;
+    // bufferdesc.memprops = ORenderer::MEMPROP_GPULOCAL;
+    // ASSERT(ORenderer::context->createbuffer(&bufferdesc, &buffer) == ORenderer::RESULT_SUCCESS, "Failed to create buffer.\n");
+    //
+    // struct ORenderer::bufferdesc stagingdesc = { };
+    // stagingdesc.size = sizeof(vertices);
+    // stagingdesc.usage = ORenderer::BUFFER_TRANSFERSRC;
+    // stagingdesc.memprops = ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPUCOHERENT | ORenderer::MEMPROP_CPUSEQUENTIALWRITE;
+    // stagingdesc.flags = 0;
+    // struct ORenderer::buffer staging = { };
+    // ASSERT(ORenderer::context->createbuffer(&stagingdesc, &staging) == ORenderer::RESULT_SUCCESS, "Failed to create staging buffer.\n");
+    //
+    // struct ORenderer::buffermapdesc stagingmapdesc = { };
+    // stagingmapdesc.buffer = staging;
+    // stagingmapdesc.size = sizeof(vertices);
+    // stagingmapdesc.offset = 0;
+    // struct ORenderer::buffermap stagingmap = { };
+    // ASSERT(ORenderer::context->mapbuffer(&stagingmapdesc, &stagingmap) == ORenderer::RESULT_SUCCESS, "Failed to map staging buffer.\n");
+    // memcpy(stagingmap.mapped[0], vertices, sizeof(vertices));
+    // ORenderer::context->unmapbuffer(stagingmap);
+    //
+    // struct ORenderer::buffercopydesc buffercopy = { };
+    // buffercopy.src = staging;
+    // buffercopy.dst = buffer;
+    // buffercopy.srcoffset = 0;
+    // buffercopy.dstoffset = 0;
+    // buffercopy.size = sizeof(vertices);
+    // ORenderer::context->copybuffer(&buffercopy);
+    //
+    // ORenderer::context->destroybuffer(&staging); // destroy so we can recreate it
+    //
+    // bufferdesc.size = sizeof(indices);
+    // bufferdesc.usage = ORenderer::BUFFER_INDEX | ORenderer::BUFFER_TRANSFERDST;
+    // bufferdesc.memprops = ORenderer::MEMPROP_GPULOCAL;
+    // ASSERT(ORenderer::context->createbuffer(&bufferdesc, &idxbuffer) == ORenderer::RESULT_SUCCESS, "Failed to create buffer.\n");
+    //
+    // stagingdesc.size = sizeof(indices);
+    // stagingdesc.usage = ORenderer::BUFFER_TRANSFERSRC;
+    // stagingdesc.memprops = ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPUCOHERENT | ORenderer::MEMPROP_CPUSEQUENTIALWRITE;
+    // stagingdesc.flags = 0;
+    // ASSERT(ORenderer::context->createbuffer(&stagingdesc, &staging) == ORenderer::RESULT_SUCCESS, "Failed to create staging buffer.\n");
+    //
+    // stagingmapdesc.buffer = staging;
+    // stagingmapdesc.size = sizeof(indices);
+    // stagingmapdesc.offset = 0;
+    // ASSERT(ORenderer::context->mapbuffer(&stagingmapdesc, &stagingmap) == ORenderer::RESULT_SUCCESS, "failed to map staging buffer.\n");
+    // memcpy(stagingmap.mapped[0], indices, sizeof(indices));
+    // ORenderer::context->unmapbuffer(stagingmap);
+    //
+    // buffercopy.src = staging;
+    // buffercopy.dst = idxbuffer;
+    // buffercopy.srcoffset = 0;
+    // buffercopy.dstoffset = 0;
+    // buffercopy.size = sizeof(indices);
+    // ORenderer::context->copybuffer(&buffercopy);
 
     struct ORenderer::bufferdesc ubodesc = { };
     ubodesc.size = sizeof(struct ubo);
@@ -298,11 +309,42 @@ void PBRPipeline::init(void) {
     ubomapdesc.offset = 0;
     ASSERT(ORenderer::context->mapbuffer(&ubomapdesc, &ubomap) == ORenderer::RESULT_SUCCESS, "Failed to map uniform buffer.\n");
 
-    ORenderer::context->destroybuffer(&staging);
-
     ORenderer::context->createbackbuffer(rpass);
     renderrect.width = engine_engine->winsize.x;
     renderrect.height = engine_engine->winsize.y;
+
+    outtex = OResource::Texture::load("misc/out.ktx2");
+
+    struct ORenderer::textureviewdesc viewdesc = { };
+    viewdesc.format = ORenderer::FORMAT_RGBA8SRGB;
+    viewdesc.texture = outtex;
+    viewdesc.type = ORenderer::IMAGETYPE_2D;
+    viewdesc.aspect = ORenderer::ASPECT_COLOUR;
+    viewdesc.mipcount = 1;
+    viewdesc.baselayer = 0;
+    viewdesc.layercount = 1;
+
+    ASSERT(ORenderer::context->createtextureview(&viewdesc, &outtexview) == ORenderer::RESULT_SUCCESS, "Failed to create view of texture.\n");
+
+    struct ORenderer::samplerdesc samplerdesc = { };
+    samplerdesc.unnormalisedcoords = false;
+    samplerdesc.maxlod = 0.0f;
+    samplerdesc.minlod = 0.0f;
+    samplerdesc.magfilter = ORenderer::FILTER_NEAREST;
+    samplerdesc.minfilter = ORenderer::FILTER_NEAREST;
+    samplerdesc.mipmode = ORenderer::FILTER_NEAREST;
+    samplerdesc.addru = ORenderer::ADDR_CLAMPEDGE;
+    samplerdesc.addrv = ORenderer::ADDR_CLAMPEDGE;
+    samplerdesc.addrw = ORenderer::ADDR_CLAMPEDGE;
+    samplerdesc.lodbias = 0.0f;
+    samplerdesc.anisotropyenable = false;
+    samplerdesc.maxanisotropy = 1.0f;
+    samplerdesc.cmpenable = false;
+    samplerdesc.cmpop = ORenderer::CMPOP_NEVER;
+    ASSERT(ORenderer::context->createsampler(&samplerdesc, &outsampler) == ORenderer::RESULT_SUCCESS, "Failed to create sampler.\n");
+
+    stages[0].destroy();
+    stages[1].destroy();
 }
 
 void PBRPipeline::resize(struct ORenderer::rect rendersize) {
@@ -333,16 +375,21 @@ void PBRPipeline::execute(ORenderer::Stream *stream) {
     struct ORenderer::framebuffer fb = { };
     ORenderer::context->requestbackbuffer(&fb);
 
+    stream->claim();
     stream->beginrenderpass(rpass, fb, (struct ORenderer::rect) { .x = 0, .y = 0, .width = renderrect.width, .height = renderrect.height }, colourdesc);
     struct ORenderer::viewport viewport = { .x = 0, .y = 0, .width = (float)renderrect.width, .height = (float)renderrect.height, .mindepth = 0.0f, .maxdepth = 1.0f };
     stream->setviewport(viewport);
     stream->setscissor((struct ORenderer::rect) { .x = 0, .y = 0, .width = renderrect.width, .height = renderrect.height });
     stream->setpipelinestate(state);
     size_t offsets = 0;
-    stream->setvtxbuffers(&buffer, &offsets, 0, 1);
-    stream->setidxbuffer(idxbuffer, 0, false);
-    stream->bindresource(0, ubo, ORenderer::RESOURCE_UNIFORM);
+    stream->setvtxbuffers(&model.meshes[0].vertexbuffer, &offsets, 0, 1);
+    stream->setidxbuffer(model.meshes[0].indexbuffer, 0, false);
+    struct ORenderer::bufferbind ubobind = { .buffer = ubo, .offset = 0, .range = SIZE_MAX };
+    stream->bindresource(0, ubobind, ORenderer::RESOURCE_UNIFORM);
+    struct ORenderer::sampledbind bind = { .sampler = outsampler, .view = outtexview, .layout = ORenderer::LAYOUT_SHADERRO };
+    stream->bindresource(1, bind, ORenderer::RESOURCE_SAMPLER);
     stream->commitresources();
-    stream->drawindexed(sizeof(indices) / sizeof(indices[0]), 1, 0, 0, 0);
+    stream->drawindexed(model.meshes[0].indices.size(), 1, 0, 0, 0);
     stream->endrenderpass();
+    stream->release();
 }

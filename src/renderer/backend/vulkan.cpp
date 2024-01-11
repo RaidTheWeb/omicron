@@ -1,4 +1,5 @@
 #include <renderer/backend/vulkan.hpp>
+#include <utils/print.hpp>
 
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
@@ -38,12 +39,23 @@ namespace OVulkan {
     }
 
     static struct extension extensions[] = {
+        { VK_KHR_SURFACE_EXTENSION_NAME, false, true, false },
+
+#ifdef VK_USE_PLATFORM_XCB_KHR
+        { VK_KHR_XCB_SURFACE_EXTENSION_NAME, false, true, false },
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+        { VK_KHR_XLIB_SURFACE_EXTENSION_NAME, false, true, false },
+#endif
+#ifdef OMICRON_DEBUG
+        { VK_EXT_DEBUG_UTILS_EXTENSION_NAME, false, true, false }
+#endif
     };
 
     static struct extension devextensions[] = {
         // TODO: Consider bindless rendering architecture
         // { VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME, false, false, false },
-        { VK_KHR_SWAPCHAIN_EXTENSION_NAME, false, false, false }
+        { VK_KHR_SWAPCHAIN_EXTENSION_NAME, false, false, false },
     };
 
     // XXX: Translation table should account for SRGB
@@ -292,6 +304,24 @@ namespace OVulkan {
         VK_COMPARE_OP_ALWAYS
     };
 
+    static VkFilter filtertable[] = {
+        VK_FILTER_NEAREST,
+        VK_FILTER_LINEAR
+    };
+
+    static VkSamplerAddressMode addrmodetable[] = {
+        VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+        VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE
+    };
+
+    static VkSamplerMipmapMode mipmodetable[] = {
+        VK_SAMPLER_MIPMAP_MODE_NEAREST,
+        VK_SAMPLER_MIPMAP_MODE_LINEAR
+    };
+
     static VkStencilOp stenciloptable[] = {
         VK_STENCIL_OP_KEEP, // RENDERER_STENCILKEEP
         VK_STENCIL_OP_ZERO, // RENDERER_STENCILZERO
@@ -417,7 +447,6 @@ namespace OVulkan {
         return cmd;
     }
 
-    // static void vulkan_endonetimecmd(VkCommandBuffer cmd) {
     void VulkanContext::endonetimecmd(VkCommandBuffer cmd) {
         vkEndCommandBuffer(cmd);
 
@@ -588,20 +617,16 @@ namespace OVulkan {
             return ORenderer::RESULT_INVALIDARG;
         }
 
-        VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        if (desc->usage & ORenderer::USAGE_COLOUR) {
-            usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-        }
-        if (desc->usage & ORenderer::USAGE_DEPTHSTENCIL) {
-            usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-        }
-        if (desc->usage & ORenderer::USAGE_STORAGE) {
-            usage |= VK_IMAGE_USAGE_STORAGE_BIT;
-        }
+        VkImageUsageFlags usage =
+            (desc->usage & ORenderer::USAGE_COLOUR ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0) |
+            (desc->usage & ORenderer::USAGE_DEPTHSTENCIL ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : 0) |
+            (desc->usage & ORenderer::USAGE_SAMPLED ? VK_IMAGE_USAGE_SAMPLED_BIT : 0) |
+            (desc->usage & ORenderer::USAGE_STORAGE ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
+            (desc->usage & ORenderer::USAGE_SRC ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0) |
+            (desc->usage & ORenderer::USAGE_DST ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0) |
+            0;
 
         if (texture->handle == RENDERER_INVALIDHANDLE) {
-            // texture->handle = vulkan_resources.size();
-            // vulkan_resources.push_back((union vulkan_resource) { });
             this->resourcemutex.lock();
             texture->handle = this->resourcehandle++;
             this->textures[texture->handle].vkresource = (struct texture) { };
@@ -684,8 +709,6 @@ namespace OVulkan {
             0;
 
         if (buffer->handle == RENDERER_INVALIDHANDLE) {
-            // buffer->handle = vulkan_resources.size();
-            // vulkan_resources.push_back((union vulkan_resource) { });
             this->resourcemutex.lock();
             buffer->handle = this->resourcehandle++;
             this->buffers[buffer->handle].vkresource = (struct buffer) { };
@@ -739,8 +762,6 @@ namespace OVulkan {
         }
 
         if (framebuffer->handle == RENDERER_INVALIDHANDLE) {
-            // framebuffer->handle = vulkan_resources.size();
-            // vulkan_resources.push_back((union vulkan_resource) { });
             this->resourcemutex.lock();
             framebuffer->handle = this->resourcehandle++;
             this->framebuffers[framebuffer->handle].vkresource = (struct framebuffer) { };
@@ -849,8 +870,6 @@ namespace OVulkan {
         passcreate.pDependencies = dep;
 
         if (pass->handle == RENDERER_INVALIDHANDLE) {
-            // pass->handle = vulkan_resources.size();
-            // vulkan_resources.push_back((union vulkan_resource) { });
             this->resourcemutex.lock();
             pass->handle = this->resourcehandle++;
             this->renderpasses[pass->handle].vkresource = (struct renderpass) { };
@@ -876,8 +895,6 @@ namespace OVulkan {
         }
 
         if (state->handle == RENDERER_INVALIDHANDLE) {
-            // state->handle = vulkan_resources.size();
-            // vulkan_resources.push_back((union vulkan_resource) {  });
             this->resourcemutex.lock();
             state->handle = this->resourcehandle++;
             this->pipelinestates[state->handle].vkresource = (struct pipelinestate) { };
@@ -983,8 +1000,6 @@ namespace OVulkan {
         }
 
         if (state->handle == RENDERER_INVALIDHANDLE) {
-            // state->handle = vulkan_resources.size();
-            // vulkan_resources.push_back((union vulkan_resource) { });
             this->resourcemutex.lock();
             state->handle = this->resourcehandle++;
             this->pipelinestates[state->handle].vkresource = (struct pipelinestate) { };
@@ -1223,8 +1238,6 @@ namespace OVulkan {
         }
 
         if (view->handle == RENDERER_INVALIDHANDLE) {
-            // view->handle = vulkan_resources.size();
-            // vulkan_resources.push    _back((union vulkan_resource) { });
             this->resourcemutex.lock();
             view->handle = this->resourcehandle++;
             this->textureviews[view->handle].vkresource = (struct textureview) { };
@@ -1260,6 +1273,43 @@ namespace OVulkan {
         return ORenderer::RESULT_SUCCESS;
     }
 
+    uint8_t VulkanContext::createsampler(struct ORenderer::samplerdesc *desc, struct ORenderer::sampler *sampler) {
+        if (sampler->handle == RENDERER_INVALIDHANDLE) {
+            this->resourcemutex.lock();
+            sampler->handle = this->resourcehandle++;
+            this->samplers[sampler->handle].vkresource = (struct sampler) { };
+            this->resourcemutex.unlock();
+        }
+
+        this->resourcemutex.lock();
+
+        struct sampler *vksampler = &this->samplers[sampler->handle].vkresource;
+
+        VkSamplerCreateInfo samplercreate = { };
+        samplercreate.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplercreate.magFilter = filtertable[desc->magfilter];
+        samplercreate.minFilter = filtertable[desc->minfilter];
+        samplercreate.mipmapMode = mipmodetable[desc->mipmode];
+        samplercreate.addressModeU = addrmodetable[desc->addru];
+        samplercreate.addressModeV = addrmodetable[desc->addrv];
+        samplercreate.addressModeW = addrmodetable[desc->addrw];
+        samplercreate.mipLodBias = desc->lodbias;
+        samplercreate.anisotropyEnable = desc->anisotropyenable;
+        samplercreate.maxAnisotropy = desc->maxanisotropy;
+        samplercreate.compareEnable = desc->cmpenable;
+        samplercreate.compareOp = compareoptable[desc->cmpop];
+        samplercreate.minLod = desc->minlod;
+        samplercreate.maxLod = desc->maxlod;
+        samplercreate.unnormalizedCoordinates = desc->unnormalisedcoords;
+        
+        VkResult res = vkCreateSampler(this->dev, &samplercreate, NULL, &vksampler->sampler);
+        ASSERT(res == VK_SUCCESS, "Failed to create Vulkan sampler %d.\n", res);
+
+        this->resourcemutex.unlock();
+
+        return ORenderer::RESULT_SUCCESS;
+    }
+
     uint8_t VulkanContext::mapbuffer(struct ORenderer::buffermapdesc *desc, struct ORenderer::buffermap *map) {
         if (desc == NULL) {
             return ORenderer::RESULT_INVALIDARG;
@@ -1275,7 +1325,6 @@ namespace OVulkan {
         if (buffer->flags & ORenderer::BUFFERFLAG_PERFRAME) {
             for (size_t i = 0; i < RENDERER_MAXLATENCY; i++) {
                 VkResult res = vmaMapMemory(allocator, buffer->allocation[i], &map->mapped[i]);
-                // VkResult res = vkMapMemory(vulkan_context->dev, buffer->memory[i], buffer->offset[i] + desc->offset, desc->size, 0, &map->mapped[i]);
                 if (res != VK_SUCCESS) {
                     resourcemutex.unlock();
                     return ORenderer::RESULT_FAILED;
@@ -1286,7 +1335,6 @@ namespace OVulkan {
         } else {
             VkResult res = vmaMapMemory(allocator, buffer->allocation[0], &map->mapped[0]);
             resourcemutex.unlock();
-            // VkResult res = vkMapMemory(vulkan_context->dev, buffer->memory[0], buffer->offset[0] + desc->offset, desc->size, 0, &map->mapped[0]);
             if (res != VK_SUCCESS) {
                 return ORenderer::RESULT_FAILED;
             }
@@ -1354,7 +1402,6 @@ namespace OVulkan {
             return; // we don't destroy the swapchain texture, we destroy the swapchain (but since that's handled by the context itself, that doesn't happen)
         } else {
             vmaDestroyImage(allocator, vktexture->image, vktexture->allocation);
-            // vulkan_resources.erase(vulkan_resources.begin() + (texture->handle));
             this->textures.erase(texture->handle);
             texture->handle = RENDERER_INVALIDHANDLE;
         }
@@ -1368,7 +1415,6 @@ namespace OVulkan {
         this->resourcemutex.lock();
         struct textureview *vktextureview = &this->textureviews[textureview->handle].vkresource;
         vkDestroyImageView(this->dev, vktextureview->imageview, NULL);
-        // vulkan_resources.erase(vulkan_resources.begin() + (textureview->handle));
         this->textureviews.erase(textureview->handle);
         textureview->handle = RENDERER_INVALIDHANDLE;
         this->resourcemutex.unlock();
@@ -1387,7 +1433,6 @@ namespace OVulkan {
                     vmaUnmapMemory(allocator, vkbuffer->allocation[i]);
                 }
                 vmaDestroyBuffer(allocator, vkbuffer->buffer[i], vkbuffer->allocation[i]);
-                // vulkan_resources.erase(vulkan_resources.begin() + (buffer->handle));
                 buffers.erase(buffer->handle);
                 buffer->handle = RENDERER_INVALIDHANDLE;
             }
@@ -1396,7 +1441,6 @@ namespace OVulkan {
                 vmaUnmapMemory(allocator, vkbuffer->allocation[0]);
             }
             vmaDestroyBuffer(allocator, vkbuffer->buffer[0], vkbuffer->allocation[0]);
-            // vulkan_resources.erase(vulkan_resources.begin() + (buffer->handle));
             this->buffers.erase(buffer->handle);
             buffer->handle = RENDERER_INVALIDHANDLE;
         }
@@ -1411,7 +1455,6 @@ namespace OVulkan {
         this->resourcemutex.lock();
         struct framebuffer *vkframebuffer = &this->framebuffers[framebuffer->handle].vkresource;
         vkDestroyFramebuffer(this->dev, vkframebuffer->framebuffer, NULL);
-        // vulkan_resources.erase(vulkan_resources.begin() + (framebuffer->handle));
         this->framebuffers.erase(framebuffer->handle);
         framebuffer->handle = RENDERER_INVALIDHANDLE;
         this->resourcemutex.unlock();
@@ -1425,7 +1468,6 @@ namespace OVulkan {
         this->resourcemutex.lock();
         struct renderpass *vkrenderpass = &this->renderpasses[pass->handle].vkresource;
         vkDestroyRenderPass(this->dev, vkrenderpass->renderpass, NULL);
-        // vulkan_resources.erase(vulkan_resources.begin() + (pass->handle));
         this->renderpasses.erase(pass->handle);
         pass->handle = RENDERER_INVALIDHANDLE;
         this->resourcemutex.unlock();
@@ -1446,10 +1488,100 @@ namespace OVulkan {
         vkFreeDescriptorSets(this->dev, this->descpool, RENDERER_MAXLATENCY, vkpipelinestate->descsets);
         vkDestroyDescriptorSetLayout(this->dev, vkpipelinestate->descsetlayout, NULL);
         vkDestroyPipeline(this->dev, vkpipelinestate->pipeline, NULL);
-        // vulkan_resources.erase(vulkan_resources.begin() + (state->handle));
         this->pipelinestates.erase(state->handle);
         state->handle = RENDERER_INVALIDHANDLE;
         this->resourcemutex.unlock();
+    }
+
+    void VulkanContext::setdebugname(struct ORenderer::texture texture, const char *name) {
+#ifdef OMICRON_DEBUG
+        VkDebugUtilsObjectNameInfoEXT nameinfo = { };
+        nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+        nameinfo.pNext = NULL;
+        nameinfo.objectHandle = (uint64_t)this->textures[texture.handle].vkresource.image;
+        nameinfo.objectType = VK_OBJECT_TYPE_IMAGE;
+        nameinfo.pObjectName = name;
+        VkResult res = vkSetDebugUtilsObjectNameEXT(this->dev, &nameinfo);
+        ASSERT(res == VK_SUCCESS, "Failed to set debug name for texture %lu to `%s`.\n", texture.handle, name);
+#endif
+    }
+
+    void VulkanContext::setdebugname(struct ORenderer::textureview view, const char *name) {
+#ifdef OMICRON_DEBUG
+        VkDebugUtilsObjectNameInfoEXT nameinfo = { };
+        nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+        nameinfo.pNext = NULL;
+        nameinfo.objectHandle = (uint64_t)this->textureviews[view.handle].vkresource.imageview;
+        nameinfo.objectType = VK_OBJECT_TYPE_IMAGE_VIEW;
+        nameinfo.pObjectName = name;
+        VkResult res = vkSetDebugUtilsObjectNameEXT(this->dev, &nameinfo);
+        ASSERT(res == VK_SUCCESS, "Failed to set debug name for texture view %lu to `%s`.\n", view.handle, name);
+#endif
+    }
+
+    void VulkanContext::setdebugname(struct ORenderer::buffer buffer, const char *name) {
+#ifdef OMICRON_DEBUG
+        if (!(this->buffers[buffer.handle].vkresource.flags & ORenderer::BUFFERFLAG_PERFRAME)) {
+            VkDebugUtilsObjectNameInfoEXT nameinfo = { };
+            nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+            nameinfo.pNext = NULL;
+            nameinfo.objectHandle = (uint64_t)this->buffers[buffer.handle].vkresource.buffer[0];
+            nameinfo.objectType = VK_OBJECT_TYPE_BUFFER;
+            nameinfo.pObjectName = name;
+            VkResult res = vkSetDebugUtilsObjectNameEXT(this->dev, &nameinfo);
+            ASSERT(res == VK_SUCCESS, "Failed to set debug name for buffer %lu to `%s`.\n", buffer.handle, name);
+        } else {
+            VkDebugUtilsObjectNameInfoEXT nameinfos[RENDERER_MAXLATENCY] = { };
+            for (size_t i = 0; i < RENDERER_MAXLATENCY; i++) {
+                nameinfos[i].sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+                nameinfos[i].pNext = NULL;
+                nameinfos[i].objectHandle = (uint64_t)this->buffers[buffer.handle].vkresource.buffer[i];
+                nameinfos[i].objectType = VK_OBJECT_TYPE_BUFFER;
+                nameinfos[i].pObjectName = name;
+                VkResult res = vkSetDebugUtilsObjectNameEXT(this->dev, &nameinfos[i]);
+                ASSERT(res == VK_SUCCESS, "Failed to set debug name for buffer %lu(latency %lu) to `%s`.\n", buffer.handle, i, name);
+
+            }
+        }
+#endif
+    }
+
+    void VulkanContext::setdebugname(struct ORenderer::framebuffer framebuffer, const char *name) {
+#ifdef OMICRON_DEBUG
+        VkDebugUtilsObjectNameInfoEXT nameinfo = { };
+        nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+        nameinfo.pNext = NULL;
+        nameinfo.objectHandle = (uint64_t)this->framebuffers[framebuffer.handle].vkresource.framebuffer;
+        nameinfo.objectType = VK_OBJECT_TYPE_FRAMEBUFFER;
+        nameinfo.pObjectName = name;
+        VkResult res = vkSetDebugUtilsObjectNameEXT(this->dev, &nameinfo);
+        ASSERT(res == VK_SUCCESS, "Failed to set debug name for framebuffer %lu to `%s`.\n", framebuffer.handle, name);
+#endif
+    }
+
+    void VulkanContext::setdebugname(struct ORenderer::renderpass renderpass, const char *name) {
+#ifdef OMICRON_DEBUG
+        VkDebugUtilsObjectNameInfoEXT nameinfo = { };
+        nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+        nameinfo.pNext = NULL;
+        nameinfo.objectHandle = (uint64_t)this->renderpasses[renderpass.handle].vkresource.renderpass;
+        nameinfo.objectType = VK_OBJECT_TYPE_RENDER_PASS;
+        nameinfo.pObjectName = name;
+        VkResult res = vkSetDebugUtilsObjectNameEXT(this->dev, &nameinfo);
+        ASSERT(res == VK_SUCCESS, "Failed to set debug name for renderpass %lu to `%s`.\n", renderpass.handle, name);
+#endif
+    }
+    void VulkanContext::setdebugname(struct ORenderer::pipelinestate state, const char *name) {
+#ifdef OMICRON_DEBUG
+        VkDebugUtilsObjectNameInfoEXT nameinfo = { };
+        nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+        nameinfo.pNext = NULL;
+        nameinfo.objectHandle = (uint64_t)this->pipelinestates[state.handle].vkresource.pipeline;
+        nameinfo.objectType = VK_OBJECT_TYPE_PIPELINE;
+        nameinfo.pObjectName = name;
+        VkResult res = vkSetDebugUtilsObjectNameEXT(this->dev, &nameinfo);
+        ASSERT(res == VK_SUCCESS, "Failed to set debug name for pipeline state %lu to `%s`.\n", state.handle, name);
+#endif
     }
 
     uint8_t VulkanContext::requestbackbuffer(struct ORenderer::framebuffer *framebuffer) {
@@ -1473,7 +1605,8 @@ namespace OVulkan {
     }
 
     void VulkanContext::interpretstream(VkCommandBuffer cmd, ORenderer::Stream *stream) {
-        stream->mutex.lock();
+        stream->claim();
+        // stream->mutex.lock();
         this->resourcemutex.lock();
         for (auto it = stream->cmd.begin(); it != stream->cmd.end(); it++) {
             switch (it->type) {
@@ -1568,7 +1701,10 @@ namespace OVulkan {
                     switch (it->resource.type) {
                         case ORenderer::RESOURCE_UNIFORM:
                         case ORenderer::RESOURCE_STORAGE:
-                            stream->mappings.push_back((struct ORenderer::pipelinestateresourcemap) { .binding = it->resource.binding, .type = it->resource.type, .buffer = it->resource.buffer });
+                            stream->mappings.push_back((struct ORenderer::pipelinestateresourcemap) { .binding = it->resource.binding, .type = it->resource.type, .bufferbind = it->resource.bufferbind });
+                        case ORenderer::RESOURCE_SAMPLER:
+                        case ORenderer::RESOURCE_STORAGEIMAGE:
+                            stream->mappings.push_back((struct ORenderer::pipelinestateresourcemap) { .binding = it->resource.binding, .type = it->resource.type, .sampledbind = it->resource.sampledbind });
                             break;
                     }
                     break;
@@ -1587,6 +1723,7 @@ namespace OVulkan {
                     VkWriteDescriptorSet *wds = (VkWriteDescriptorSet *)stream->tempmem.alloc(sizeof(VkWriteDescriptorSet) * stream->mappings.size());
                     // XXX: Always be careful about scope! Higher optimisation levels seem to treat anything even one level out of scope as invalid (so we should make sure not to let that happen!)
                     VkDescriptorBufferInfo *buffinfos = (VkDescriptorBufferInfo *)stream->tempmem.alloc(sizeof(VkDescriptorBufferInfo) * stream->mappings.size());
+                    VkDescriptorImageInfo *imginfos = (VkDescriptorImageInfo *)stream->tempmem.alloc(sizeof(VkDescriptorImageInfo) * stream->mappings.size()); // we're allocating with worst case in mind
                     for (size_t i = 0; i < stream->mappings.size(); i++) {
                         wds[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                         wds[i].pNext = NULL;
@@ -1595,13 +1732,22 @@ namespace OVulkan {
                         wds[i].dstArrayElement = 0;
                         wds[i].descriptorCount = 1;
                         if (stream->mappings[i].type == ORenderer::RESOURCE_UNIFORM || stream->mappings[i].type == ORenderer::RESOURCE_STORAGE) {
-                            struct buffer *buffer = &this->buffers[stream->mappings[i].buffer.handle].vkresource;
+                            struct ORenderer::bufferbind bind = stream->mappings[i].bufferbind;
+                            struct buffer *buffer = &this->buffers[bind.buffer.handle].vkresource;
                             wds[i].descriptorType = descriptortypetable[stream->mappings[i].type];
                             buffinfos[i].buffer = buffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? buffer->buffer[this->frame] : buffer->buffer[0];
-                            buffinfos[i].offset = 0;
-                            buffinfos[i].range = VK_WHOLE_SIZE;
+                            buffinfos[i].offset = bind.offset;
+                            buffinfos[i].range = bind.range == SIZE_MAX ? VK_WHOLE_SIZE : bind.range;
                             wds[i].pBufferInfo = &buffinfos[i];
                         } else if (stream->mappings[i].type == ORenderer::RESOURCE_SAMPLER || stream->mappings[i].type == ORenderer::RESOURCE_STORAGEIMAGE) {
+                            struct ORenderer::sampledbind bind = stream->mappings[i].sampledbind;
+                            struct sampler *sampler = &this->samplers[bind.sampler.handle].vkresource;
+                            struct textureview *view = &this->textureviews[bind.view.handle].vkresource;
+                            wds[i].descriptorType = descriptortypetable[stream->mappings[i].type];
+                            imginfos[i].sampler = sampler->sampler;
+                            imginfos[i].imageView = view->imageview;
+                            imginfos[i].imageLayout = layouttable[bind.layout];
+                            wds[i].pImageInfo = &imginfos[i];
                         }
                     }
 
@@ -1613,11 +1759,33 @@ namespace OVulkan {
                     vkCmdBindDescriptorSets(cmd, pipelinestate->type == ORenderer::GRAPHICSPIPELINE ? VK_PIPELINE_BIND_POINT_GRAPHICS : VK_PIPELINE_BIND_POINT_COMPUTE, pipelinestate->pipelinelayout, 0, 1, &pipelinestate->descsets[this->frame], 0, NULL);
                     break;
                 }
+                case ORenderer::Stream::OP_COPYBUFFERIMAGE: {
+                    struct ORenderer::bufferimagecopy region = it->copybufferimage.region;
+                    struct buffer *buffer = &this->buffers[it->copybufferimage.buffer.handle].vkresource;
+                    struct texture *texture = &this->textures[it->copybufferimage.texture.handle].vkresource;
+                    VkBufferImageCopy vkregion = { };
+                    vkregion.bufferOffset = region.offset;
+                    vkregion.bufferRowLength = region.rowlen;
+                    vkregion.bufferImageHeight = region.imgheight;
+                    vkregion.imageSubresource.aspectMask =
+                        (region.aspect & ORenderer::ASPECT_COLOUR ? VK_IMAGE_ASPECT_COLOR_BIT : 0) |
+                        (region.aspect & ORenderer::ASPECT_DEPTH ? VK_IMAGE_ASPECT_DEPTH_BIT : 0) |
+                        (region.aspect & ORenderer::ASPECT_STENCIL ? VK_IMAGE_ASPECT_STENCIL_BIT : 0) |
+                        0;
+                    vkregion.imageSubresource.mipLevel = region.mip;
+                    vkregion.imageSubresource.layerCount = region.layercount;
+                    vkregion.imageSubresource.baseArrayLayer = region.baselayer;
+                    vkregion.imageExtent = { (uint32_t)region.imgextent.width, (uint32_t)region.imgextent.height, (uint32_t)region.imgextent.depth };
+                    vkregion.imageOffset = { (int32_t)region.imgoff.x, (int32_t)region.imgoff.y, (int32_t)region.imgoff.z };
+                    vkCmdCopyBufferToImage(cmd, buffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? buffer->buffer[this->frame] : buffer->buffer[0], texture->image, layouttable[texture->state], 1, &vkregion);
+                    break;
+                }
             }
         }
 
         this->resourcemutex.unlock();
-        stream->mutex.unlock();
+        // stream->mutex.unlock();
+        stream->release();
     }
 
     uint8_t VulkanContext::submitstream(ORenderer::Stream *stream) {
@@ -1644,8 +1812,6 @@ namespace OVulkan {
 
         // do stuff
         this->interpretstream(cmd, stream);
-
-        // vulkan_transitionlayout(cmd, &vulkan_textures[this->swaptextures[image].handle].vkresource, RENDERER_FORMATBGRA8, RENDERER_LAYOUTCOLOURATTACHMENT);
 
         res = vkEndCommandBuffer(cmd);
         ASSERT(res == VK_SUCCESS, "Failed to end Vulkan command buffer recording %d.\n", res);
@@ -1722,10 +1888,6 @@ namespace OVulkan {
         for (size_t i = 0; i < this->swaptexturecount; i++) {
             // we use custom code to force the swapchain texture into the resources array as opposed to using our existing api
             if (this->swaptextures[i].handle == RENDERER_INVALIDHANDLE) {
-                // XXX: Handle system is actually broken :(
-                // Do something different
-                // this->swaptextures[i].handle = vulkan_resources.size();
-                // vulkan_resources.push_back((union vulkan_resource) { });
                 this->resourcemutex.lock();
                 this->swaptextures[i].handle = this->resourcehandle++;
                 this->textures[this->swaptextures[i].handle].vkresource = (struct texture) { };
@@ -1736,6 +1898,9 @@ namespace OVulkan {
             vktexture->state = VK_IMAGE_LAYOUT_UNDEFINED; // this is the state our swapchain textures start out as
             vktexture->image = images[i];
             vktexture->flags = VULKAN_TEXTURESWAPCHAIN; // so that we dont try to destroy a VMA allocation that doesn't exist
+            char buf[64];
+            sprintf(buf, "Backbuffer Texture %lu", i);
+            this->setdebugname(this->swaptextures[i], buf);
             this->resourcemutex.unlock();
 
             struct ORenderer::textureviewdesc viewdesc = { };
@@ -1747,6 +1912,8 @@ namespace OVulkan {
             viewdesc.baselayer = 0;
             viewdesc.layercount = 1;
             ASSERT(this->createtextureview(&viewdesc, &this->swaptextureviews[i]) == ORenderer::RESULT_SUCCESS, "Failed to create Vulkan swapchain texture view.\n");
+            sprintf(buf, "Backbuffer Texture View %lu", i);
+            this->setdebugname(this->swaptextureviews[i], buf);
         }
     }
 
@@ -1766,61 +1933,15 @@ namespace OVulkan {
             fbdesc.pass = pass; // XXX: How do we setup the renderpass for the backbuffer?
             fbdesc.attachments = &this->swaptextureviews[i];
             ASSERT(this->createframebuffer(&fbdesc, &this->swapfbs[i]) == ORenderer::RESULT_SUCCESS, "Failed to create Vulkan swapchain framebuffer.\n");
+            char buf[64];
+            sprintf(buf, "Backbuffer %lu", i);
+            this->setdebugname(this->swapfbs[i], buf);
         }
         return ORenderer::RESULT_SUCCESS;
     }
 
-    // static void vulkan_createfbs(void) {
-    //     VkResult res;
-    //     for (size_t i = 0; i < vulkan_context->swapimagecount; i++) {
-    //         VkImageView attachments[] = {
-    //             vulkan_context->swapimageviews[i],
-    //         };
-    //
-    //         VkFramebufferCreateInfo fbcreate = { };
-    //         fbcreate.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    //         fbcreate.renderPass = vulkan_context->renderpass; // FUCK, framebuffers are specific to render passes???
-    //         fbcreate.attachmentCount = 1;
-    //         fbcreate.pAttachments = attachments;
-    //         fbcreate.width = vulkan_context->surfacecaps.currentExtent.width;
-    //         fbcreate.height = vulkan_context->surfacecaps.currentExtent.height;
-    //         fbcreate.layers = 1;
-    //
-    //         res = vkCreateFramebuffer(vulkan_context->dev, &fbcreate, NULL, &vulkan_context->swapchainfbs[i]);
-    //         ASSERT(res == VK_SUCCESS, "Failed to create Vulkan framebuffer %d.\n", res);
-    //     }
-    //
-    // }
-
-    // static void vulkan_cleanupswap(void) {
-    //     for (size_t i = 0; i < vulkan_context->swapimagecount; i++) {
-    //         vkDestroyFramebuffer(vulkan_context->dev, vulkan_context->swapchainfbs[i], NULL);
-    //         vkDestroyImageView(vulkan_context->dev, vulkan_context->swapimageviews[i], NULL);
-    //     }
-    //     // vkDestroyImageView(vulkan_context->dev, depthimageview, NULL);
-    //     // vkDestroyImage(vulkan_context->dev, depthimage, NULL);
-    //     // vkFreeMemory(vulkan_context->dev, depthimagemem, NULL);
-    //
-    //     vkDestroySwapchainKHR(vulkan_context->dev, vulkan_context->swapchain, NULL);
-    // }
-
-    // static void vulkan_recreateswap(void) {
-    //     vkDeviceWaitIdle(vulkan_context->dev); // wait until device is done with resources
-    //
-    //     vulkan_cleanupswap();
-    //     ((VulkanContext *)renderer_context)->createswapchain();
-    //     // vulkan_createswapchain();
-    //     // vulkan_createimage(vulkan_context->surfacecaps.currentExtent.width, vulkan_context->surfacecaps.currentExtent.height, 1, VK_IMAGE_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 1, 1, &depthimage, &);
-    //     // depthimageview = vulkan_createimageview(depthimage, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT, 1, 1);
-    //     // vulkan_transitionimagelayout(VK_NULL_HANDLE, true, depthimage, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 1, 1);
-    //     // vulkan_createimageviews();
-    //     ((VulkanContext *)renderer_context)->createswapchainviews();
-    //
-    //     // vulkan_createfbs();
-    // }
-
     VulkanContext::~VulkanContext(void) {
-        printf("Shutting down Vulkan context and destroying all active resources.\n");
+        OUtils::print("Shutting down Vulkan context and destroying all active resources.\n");
 
         vkDeviceWaitIdle(this->dev); // required to allow us to do any work
 
@@ -1840,6 +1961,11 @@ namespace OVulkan {
         for (auto it = this->textureviews.begin(); it != this->textureviews.end(); it++) {
             struct textureview vktextureview = it->second.vkresource;
             vkDestroyImageView(this->dev, vktextureview.imageview, NULL);
+        }
+
+        for (auto it = this->samplers.begin(); it != this->samplers.end(); it++) {
+            struct sampler vksampler = it->second.vkresource;
+            vkDestroySampler(this->dev, vksampler.sampler, NULL);
         }
 
         for (auto it = this->buffers.begin(); it != this->buffers.end(); it++) {
@@ -1929,23 +2055,16 @@ namespace OVulkan {
         info.engineVersion = VK_MAKE_VERSION(OMICRON_VERSION, 0, 0);
         info.apiVersion = apiversion;
 
-        uint32_t glfwextcount;
-        const char **glfwexts = NULL;
-        glfwexts = glfwGetRequiredInstanceExtensions(&glfwextcount);
-        struct extension *extensions = (struct extension *)malloc(sizeof(struct extension) * glfwextcount);
-        for (size_t i = 0; i < glfwextcount; i++) {
-            struct extension *extension = &extensions[i];
-            extension->instance = false;
-            extension->supported = false;
-            extension->name = glfwexts[i];
+        const char *extensions[sizeof(OVulkan::extensions) / sizeof(OVulkan::extensions[0])]; // purely string representation of vulkan device extensions
+        for (size_t i = 0; i < sizeof(OVulkan::extensions) / sizeof(OVulkan::extensions[0]); i++) {
+           extensions[i] = OVulkan::extensions[i].name;
         }
 
-        checkextensions(VK_NULL_HANDLE, extensions, glfwextcount);
+        checkextensions(VK_NULL_HANDLE, OVulkan::extensions, sizeof(OVulkan::extensions) / sizeof(OVulkan::extensions[0]));
 
-        for (size_t i = 0; i < glfwextcount; i++) {
-            ASSERT(extensions[i].optional || extensions[i].supported, "Required Vulkan extension %s is not present when needed for GLFW.\n", extensions[i].name);
+        for (size_t i = 0; i < sizeof(OVulkan::extensions) / sizeof(OVulkan::extensions[0]); i++) {
+            ASSERT(OVulkan::extensions[i].optional || OVulkan::extensions[i].supported, "Required Vulkan extension %s is not present when needed for instance.\n", OVulkan::extensions[i].name);
         }
-        free(extensions);
 
         VkInstanceCreateInfo instancecreate = { };
         instancecreate.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -1955,8 +2074,8 @@ namespace OVulkan {
         instancecreate.enabledLayerCount = 1;
         const char *validation[] = { "VK_LAYER_KHRONOS_validation" };
         instancecreate.ppEnabledLayerNames = validation;
-        instancecreate.enabledExtensionCount = glfwextcount;
-        instancecreate.ppEnabledExtensionNames = glfwexts;
+        instancecreate.enabledExtensionCount = sizeof(OVulkan::extensions) / sizeof(OVulkan::extensions[0]);
+        instancecreate.ppEnabledExtensionNames = extensions;
 
         res = vkCreateInstance(&instancecreate, NULL, &this->instance);
         ASSERT(res == VK_SUCCESS, "Failed to create instance with error %d.\n", res);
@@ -1997,7 +2116,7 @@ namespace OVulkan {
         this->phy = phys[phyidx];
         vkGetPhysicalDeviceProperties(this->phy, &this->phyprops);
 
-        printf("Using Vulkan compatible device %s (Vulkan API: %d.%d.%d)\n", this->phyprops.deviceName, VK_API_VERSION_MAJOR(this->phyprops.apiVersion), VK_API_VERSION_MINOR(this->phyprops.apiVersion), VK_API_VERSION_PATCH(this->phyprops.apiVersion));
+        OUtils::print("Using Vulkan compatible device %s (Vulkan API: %d.%d.%d)\n", this->phyprops.deviceName, VK_API_VERSION_MAJOR(this->phyprops.apiVersion), VK_API_VERSION_MINOR(this->phyprops.apiVersion), VK_API_VERSION_PATCH(this->phyprops.apiVersion));
 
         vkGetPhysicalDeviceFeatures(this->phy, &this->phyfeatures);
         // memset(&this->enabledphyfeatures, 0, sizeof(VkPhysicalDeviceProperties));

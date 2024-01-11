@@ -9,7 +9,7 @@ BIN_DIR = bin
 BUILD_DIR = build
 CC = gcc
 CXX = g++
-CFLAGS = -g -std=gnu++17 -I$(SOURCE_DIR)/include -I$(SOURCE_DIR)/ \
+CFLAGS = -std=gnu++17 -I$(SOURCE_DIR)/include -I$(SOURCE_DIR)/ \
 		 -Ilibs/glm/ \
 		 -Ilibs/KTX-Software/include \
 		 -Ilibs/glfw/include \
@@ -30,39 +30,41 @@ LDFLAGS = -lglfw \
 
 HEADERS = $(shell find $(SOURCE_DIR)/include -type f -name '*.hpp')
 SOURCES = $(shell find $(SOURCE_DIR) -type f -name '*.cpp')
-# OBJECTS = $(addprefix $(BUILD_DIR)/, $(SOURCES:.c=.o))
+SHADERS = $(shell find $(SOURCE_DIR)/shaders -type f -name '*.glsl')
+OSHADERS = $(SHADERS:.glsl=.spv)
 OBJECTS = $(SOURCES:.cpp=.o)
-
-# override SPACE := $(subst ,, )
-# MKESCAPE = $(subst $(SPACE),\ ,$(1))
-# SHESCAPE = $(subst ','\'',$(1))
-# OBJESCAPE = $(subst .a ,.a' ',$(subst .o ,.o' ',$(call SHESCAPE,$(1))))
-
-
-# HEADERS = $(shell cd '$(call MKESCAPE,$(SOURCE_DIR))/include' && find -L * -type f -name '*.h')
-# SOURCES = $(shell cd '$(call MKESCAPE,$(SOURCE_DIR))/' && find -L * -type f -name '*.c')
-# OBJECTS = $(addprefix $(call MKESCAPE,$(BUILD_DIR))/,$(SOURCES:.c=.o))
 
 OMICRON_RENDERBACKEND ?= vulkan
 ifeq ($(strip $(OMICRON_RENDERBACKEND)), vulkan)
-CFLAGS += -DOMICRON_RENDERVULKAN=1
+	CFLAGS += -DOMICRON_RENDERVULKAN=1 -DOMICRON_RENDERBACKENDVULKAN=1
 else ifeq ($(strip $(OMICRON_RENDERBACKEND)), opengl)
-CFLAGS += -DOMICRON_RENDEROPENGL=1
+	CFLAGS += -DOMICRON_RENDEROPENGL=1
 endif
 
-# CFLAGS += -DOMICRON_RENDERBACKENDBGFX=1
+DEBUG ?= 1
 
-CFLAGS += -DOMICRON_RENDERBACKENDVULKAN=1
+ifeq ($(strip $(DEBUG)), 1)
+	CFLAGS += -g -DOMICRON_DEBUG=1
+else
+	CFLAGS += -O2
+endif
 
 .PHONY: clean utils
 
-all: $(BIN_DIR)/$(OUT)
+all: utils $(OSHADERS) $(BIN_DIR)/$(OUT)
 
 run: shaders $(BIN_DIR)/$(OUT)
 	@$(BIN_DIR)/$(OUT)
 
-utils:
+utils: utils/rpak
+	
+utils/rpak: utils/rpak.c
+	@echo "Compiling utils/rpak"
 	@$(CC) -o utils/rpak utils/rpak.c -lz
+
+%.spv: %.glsl
+	@printf "Compiling GLSL shader %s to Vulkan SPIRV\n" $^
+	@glslc -fshader-stage=$(shell python3 src/shaders/getshaderstage.py $^) -o $@ $^ 
 
 $(BIN_DIR)/$(OUT): $(OBJECTS)
 	@printf "%8s %-40s %s %s\n" $(CXX) $@ "$(CFLAGS)" "$(LDFLAGS)"

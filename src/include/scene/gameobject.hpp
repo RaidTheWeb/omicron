@@ -2,8 +2,10 @@
 #define _SCENE__GAMEOBJECT_HPP
 
 #include <engine/transform.hpp>
+#include <renderer/mesh.hpp>
 #include <unordered_set>
 #include <utils/memory.hpp>
+#include <vector>
 
 namespace OScene {
     // XXX: GRAHHHHHH, we might want a system that uses components to make it easier to program, but idk
@@ -34,6 +36,7 @@ namespace OScene {
             bool dynallocated; // allocated dynamically
         public:
             Transform transform;
+            GameObject *parent;
             std::vector<GameObject *> children;
 
             // XXX: Potentially different versions of these destructors for handling dynamic objects vs. static scene loaded objects (these would be host malloc'd as speed isn't a major concern in level loading)
@@ -51,6 +54,7 @@ namespace OScene {
             }
     };
 
+    // Omnidirectional light
     class PointLight : public GameObject {
         public:
             glm::vec3 colour = glm::vec3(1.0f);
@@ -58,15 +62,17 @@ namespace OScene {
             float range = 1.0f;
     };
 
+    // Light with specific cone of influence
     class SpotLight : public GameObject {
         public:
             glm::vec3 colour = glm::vec3(1.0f);
             float intensity = 1.0f;
     };
 
-    class MeshInstance : public GameObject {
+    // Game object tied to one or more meshes
+    class ModelInstance : public GameObject {
         public:
-
+            ORenderer::Model model;
     };
 
 

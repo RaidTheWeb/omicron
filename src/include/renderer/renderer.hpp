@@ -63,12 +63,12 @@ namespace ORenderer {
     };
 
     enum {
-        SAMPLER_REPEAT,
-        SAMPLER_MIRROREDREPEAT,
-        SAMPLER_CLAMPEDGE,
-        SAMPLER_CLAMPBORDER,
-        SAMPLER_MIRRORCLAMPEDGE,
-        SAMPLER_COUNT
+        ADDR_REPEAT,
+        ADDR_MIRROREDREPEAT,
+        ADDR_CLAMPEDGE,
+        ADDR_CLAMPBORDER,
+        ADDR_MIRRORCLAMPEDGE,
+        ADDR_COUNT
     };
 
     class Shader {
@@ -77,23 +77,37 @@ namespace ORenderer {
             void *code;
             size_t size;
 
-            Shader(const char *path, uint8_t type) {
-                FILE *f = fopen(path, "r");
-                ASSERT(f != NULL, "Failed to load shader '%s'.\n", path);
-                fseek(f, 0, SEEK_END);
-                size_t size = ftell(f);
-                fseek(f, 0, SEEK_SET);
-                void *code = malloc(size);
-                fread(code, size, 1, f);
-                this->type = type;
-                this->code = code;
-                this->size = size;
+            Shader(const char *path, uint8_t type) { 
+                OResource::Resource *res = OResource::manager.get(path);
+                if (res->type == OResource::Resource::SOURCE_OSFS) {
+                    FILE *f = fopen(path, "r");
+                    ASSERT(f != NULL, "Failed to load shader '%s'.\n", path);
+                    fseek(f, 0, SEEK_END);
+                    size_t size = ftell(f);
+                    fseek(f, 0, SEEK_SET);
+                    void *code = malloc(size);
+                    fread(code, size, 1, f);
+                    this->type = type;
+                    this->code = code;
+                    this->size = size;
+                } else if (res->type == OResource::Resource::SOURCE_RPAK) {
+                    struct OResource::RPak::tableentry entry = res->rpakentry;
+                    void *code = malloc(entry.uncompressedsize);
+                    ASSERT(res->rpak->read(path, code, entry.uncompressedsize, 0) > 0, "Failed to load shader '%s'.\n", path);
+                    this->size = entry.uncompressedsize;
+                    this->type = type;
+                    this->code = code;
+                }
             }
 
             Shader(void *code, size_t size, uint8_t type) {
                 this->type = type;
                 this->code = code;
                 this->size = size;
+            }
+
+            void destroy(void) {
+                free(this->code);
             }
     };
 
@@ -755,6 +769,27 @@ namespace ORenderer {
         Shader *stages;
     };
 
+    struct samplerdesc {
+        size_t magfilter;
+        size_t minfilter;
+        size_t mipmode;
+        size_t addru;
+        size_t addrv;
+        size_t addrw;
+        float lodbias;
+        bool anisotropyenable;
+        float maxanisotropy;
+        bool cmpenable;
+        size_t cmpop;
+        float minlod;
+        float maxlod;
+        bool unnormalisedcoords;
+    };
+
+    struct sampler {
+        size_t handle = RENDERER_INVALIDHANDLE;
+    };
+
     class Stream;
 
     class RendererContext {
@@ -782,6 +817,9 @@ namespace ORenderer {
 
             // Create a compute pipeline state.
             virtual uint8_t createcomputepipelinestate(struct computepipelinestatedesc *desc, struct pipelinestate *state) { return RESULT_SUCCESS; }
+
+            // Create a sampler.
+            virtual uint8_t createsampler(struct samplerdesc *desc, struct sampler *sampler) { return RESULT_SUCCESS; }
 
             // XXX: Think real hard about everything, how do I want to go about it?
             // Probably anything synchronous (on demand and not related to a command "stream") should be put here as we want our changes to be reflected immediately rather than have them appear at a later date.
@@ -821,6 +859,13 @@ namespace ORenderer {
             // Destroy a pipeline state.
             virtual void destroypipelinestate(struct pipelinestate *state) { }
 
+            virtual void setdebugname(struct ORenderer::texture texture, const char *name) { }
+            virtual void setdebugname(struct ORenderer::textureview view, const char *name) { }
+            virtual void setdebugname(struct ORenderer::buffer buffer, const char *name) { }
+            virtual void setdebugname(struct ORenderer::framebuffer framebuffer, const char *name) { }
+            virtual void setdebugname(struct ORenderer::renderpass renderpass, const char *name) { }
+            virtual void setdebugname(struct ORenderer::pipelinestate state, const char *name) { }
+
             // Adjust a projection matrix to represent the intended results from GLM
             virtual void adjustprojection(glm::mat4 *mtx) { }
     };
@@ -829,6 +874,43 @@ namespace ORenderer {
     extern RendererContext *context;
     RendererContext *createcontext(void);
 
+    struct bufferimagecopy {
+        size_t offset;
+        size_t rowlen;
+        size_t imgheight;
+        glm::vec3 imgoff;
+        struct {
+            size_t width;
+            size_t height;
+            size_t depth;
+        } imgextent;
+        uint8_t aspect;
+        size_t mip;
+        size_t baselayer;
+        size_t layercount;
+    };
+
+    struct sampledbind {
+        struct sampler sampler;
+        struct textureview view;
+        size_t layout;
+    };
+
+    struct bufferbind {
+        struct buffer buffer;
+        size_t offset;
+        size_t range;
+    };
+
+    struct pipelinestateresourcemap {
+        size_t binding;
+        size_t type;
+        union {
+            struct bufferbind bufferbind;
+            struct sampledbind sampledbind;
+        };
+    }; 
+    
     struct streamnibble {
         size_t type;
         union {
@@ -856,7 +938,8 @@ namespace ORenderer {
                 size_t binding;
                 size_t type;
                 union {
-                    struct buffer buffer;
+                    struct bufferbind bufferbind;
+                    struct sampledbind sampledbind;
                 };
             } resource;
             struct {
@@ -872,10 +955,6 @@ namespace ORenderer {
                 size_t vtxoffset;
                 size_t firstinstance;
             } drawindexed;
-            struct {
-                size_t binding;
-                struct buffer buffer;
-            } bindbuffer;
             struct {
                 struct buffer src;
                 struct buffer dst;
@@ -894,24 +973,19 @@ namespace ORenderer {
                 size_t format;
                 size_t state;
             } layout;
+            struct {
+                struct bufferimagecopy region;
+                struct buffer buffer;
+                struct texture texture;
+            } copybufferimage;
         };
-    };
-
-    struct pipelinestateresourcemap {
-        size_t binding;
-        size_t type;
-        union {
-            struct buffer buffer;
-            size_t format;
-            size_t state;
-        };
-    };
+    }; 
 
     // Stream system that allows render commands to be submitted by any number of jobs and have them be executed with concurrent safety in a render context later.
     class Stream {
-        public:
+        private:
             OJob::Mutex mutex;
-
+        public:
             // these few variables after this are cleared every frame
             std::vector<struct streamnibble> cmd;
             // we keep some temporary memory per-frame in order to allow us to offer persistence to data instead of letting it go out of scope, used for anything pointer related (eg. copy to temporary buffer and free later)
@@ -933,8 +1007,19 @@ namespace ORenderer {
                 OP_DRAWINDEXED,
                 OP_BINDRESOURCE,
                 OP_COMMITRESOURCES,
-                OP_TRANSITIONLAYOUT
+                OP_TRANSITIONLAYOUT,
+                OP_COPYBUFFERIMAGE
             };
+           
+            // Lock the stream to protect against out-of-order command submission (not strictly needed, but useful to prevent race conditions).
+            void claim(void) {
+                this->mutex.lock();
+            }
+
+            // Release stream to allow it to be claimed again.
+            void release(void) {
+                this->mutex.unlock();
+            }
 
             // Flush stream command list and clear all temporary memory.
             void flushcmd(void) {
@@ -957,82 +1042,82 @@ namespace ORenderer {
 
             // Set viewport for renderering.
             void setviewport(struct viewport viewport) {
-                this->mutex.lock();
+                // this->mutex.lock();
                 this->cmd.push_back((struct streamnibble) { .type = OP_SETVIEWPORT, .viewport = viewport });
-                this->mutex.unlock();
+                // this->mutex.unlock();
             }
 
             // Set scissor for renderering
             void setscissor(struct rect rect) {
-                this->mutex.lock();
+                // this->mutex.lock();
                 this->cmd.push_back((struct streamnibble) { .type = OP_SETSCISSOR, .scissor = rect });
-                this->mutex.unlock();
+                // this->mutex.unlock();
             }
 
             // Begin a renderpass for a framebuffer with renderering area and clear colours.
             void beginrenderpass(struct renderpass renderpass, struct framebuffer framebuffer, struct rect area, struct clearcolourdesc clear) {
-                this->mutex.lock();
+                // this->mutex.lock();
                 this->cmd.push_back((struct streamnibble) { .type = OP_BEGINRENDERPASS, .renderpass = {
                     .rpass = renderpass,
                     .fb = framebuffer,
                     .area = area,
                     .clear = clear
                 } });
-                this->mutex.unlock();
+                // this->mutex.unlock();
             }
 
             // End a renderpass.
             void endrenderpass(void) {
-                this->mutex.lock();
+                // this->mutex.lock();
                 this->cmd.push_back((struct streamnibble) { .type = OP_ENDRENDERPASS });
-                this->mutex.unlock();
+                // this->mutex.unlock();
             }
 
             // Set the current pipeline state.
             void setpipelinestate(struct pipelinestate pipeline) {
-                this->mutex.lock();
+                // this->mutex.lock();
                 this->cmd.push_back((struct streamnibble) { .type = OP_SETPIPELINESTATE, .pipeline = pipeline });
-                this->mutex.unlock();
+                // this->mutex.unlock();
             }
 
             // Set the current index buffer for use before a draw call.
             void setidxbuffer(struct buffer buffer, size_t offset, bool index32) {
-                this->mutex.lock();
+                // this->mutex.lock();
                 this->cmd.push_back((struct streamnibble) { .type = OP_SETIDXBUFFER, .idxbuffer = {
                     .buffer = buffer,
                     .offset = offset,
                     .index32 = false,
                 } });
-                this->mutex.unlock();
+                // this->mutex.unlock();
             }
 
             // Set the current vertex buffers for use before a draw call.
             void setvtxbuffers(struct buffer *buffers, size_t *offsets, size_t firstbind, size_t bindcount) {
-                this->mutex.lock();
+                // this->mutex.lock();
                 this->cmd.push_back((struct streamnibble) { .type = OP_SETVTXBUFFERS, .vtxbuffers = {
                     .buffers = this->allocfor(buffers, bindcount),
                     .offsets = this->allocfor(offsets, bindcount),
                     .firstbind = firstbind,
                     .bindcount = bindcount
                 } });
-                this->mutex.unlock();
+                // this->mutex.unlock();
             }
 
             // Draw unindexed vertices.
             void draw(size_t vtxcount, size_t instancecount, size_t firstvtx, size_t firstinstance) {
-                this->mutex.lock();
+                // this->mutex.lock();
                 this->cmd.push_back((struct streamnibble) { .type = OP_DRAW, .draw = {
                     .vtxcount = vtxcount,
                     .instancecount = instancecount,
                     .firstvtx = firstvtx,
                     .firstinstance = firstinstance
                 } });
-                this->mutex.unlock();
+                // this->mutex.unlock();
             }
 
             // Draw indexed vertices.
             void drawindexed(size_t idxcount, size_t instancecount, size_t firstidx, size_t vtxoffset, size_t firstinstance) {
-                this->mutex.lock();
+                // this->mutex.lock();
                 this->cmd.push_back((struct streamnibble) { .type = OP_DRAWINDEXED, .drawindexed = {
                     .idxcount = idxcount,
                     .instancecount = instancecount,
@@ -1040,36 +1125,51 @@ namespace ORenderer {
                     .vtxoffset = vtxoffset,
                     .firstinstance = firstinstance
                 } });
-                this->mutex.unlock();
+                // this->mutex.unlock();
             }
 
             // Commit currently set pipeline resources.
             void commitresources(void) {
-                this->mutex.lock();
+                // this->mutex.lock();
                 this->cmd.push_back((struct streamnibble) { .type = OP_COMMITRESOURCES });
-                this->mutex.unlock();
+                // this->mutex.unlock();
             }
 
             // Bind a pipeline resource to a binding.
-            void bindresource(size_t binding, struct buffer buffer, size_t type) {
-                this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_BINDRESOURCE, .resource = { .binding = binding, .type = type, .buffer = buffer } });
-                this->mutex.unlock();
+            void bindresource(size_t binding, struct bufferbind bind, size_t type) {
+                // this->mutex.lock();
+                this->cmd.push_back((struct streamnibble) { .type = OP_BINDRESOURCE, .resource = { .binding = binding, .type = type, .bufferbind = bind } });
+                // this->mutex.unlock();
+            }
+
+            void bindresource(size_t binding, struct sampledbind bind, size_t type) {
+                // this->mutex.lock();
+                this->cmd.push_back((struct streamnibble) { .type = OP_BINDRESOURCE, .resource = { .binding = binding, .type = type, .sampledbind = bind } });
+                // this->mutex.unlock();
             }
 
             // Transition a texture between layouts.
             void transitionlayout(struct texture texture, size_t format, size_t state) {
-                this->mutex.lock();
+                // this->mutex.lock();
                 this->cmd.push_back((struct streamnibble) { .type = OP_TRANSITIONLAYOUT, .layout = {
                     .texture = texture, .format = format, .state = state
                 } });
-                this->mutex.unlock();
+                // this->mutex.unlock();
+            }
+
+            void copybufferimage(struct bufferimagecopy region, struct buffer buffer, struct texture texture) {
+                // this->mutex.lock();
+                this->cmd.push_back((struct streamnibble) { .type = OP_COPYBUFFERIMAGE, .copybufferimage =  {
+                    .region = region, .buffer = buffer, .texture = texture
+                } });
+                // this->mutex.unlock();
             }
 
             // Submit another stream's command list to the current command list (the result will be as if the commands were submitted to this current stream)
             void submitstream(Stream *stream) {
-                this->mutex.lock();
-                stream->mutex.lock();
+                // this->mutex.lock();
+                // stream->mutex.lock();
+                stream->claim();
                 for (auto it = stream->cmd.begin(); it != stream->cmd.end(); it++) {
                     if (it->type == OP_SETVTXBUFFERS) {
                         this->cmd.push_back((struct streamnibble) { .type = OP_SETVTXBUFFERS, .vtxbuffers = {
@@ -1083,8 +1183,9 @@ namespace ORenderer {
                     }
                 }
 
-                stream->mutex.unlock();
-                this->mutex.unlock();
+                stream->release();
+                // stream->mutex.unlock();
+                // this->mutex.unlock();
             }
     };
 

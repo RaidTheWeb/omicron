@@ -38,6 +38,7 @@
 
 #include <resources/rpak.hpp>
 #include <resources/texture.hpp>
+#include <renderer/mesh.hpp>
 
 #include <scene/scene.hpp>
 #include <utils/containers.hpp>
@@ -67,25 +68,22 @@ int main(int argc, const char **argv) {
     struct ORenderer::renderer *renderer = ORenderer::initrenderer();
     camera_init(renderer);
 
+    OResource::RPak rpak = OResource::RPak("test.rpak");
+    OResource::manager.loadrpak(&rpak);
+    OResource::RPak shaders = OResource::RPak("shaders.rpak");
+    OResource::manager.loadrpak(&shaders);
+
+    // OResource::manager.create("misc/model.glb");
+
+    // OResource::manager.create("misc/out.ktx2"); 
+
     PBRPipeline pipeline = PBRPipeline();
     pipeline.init();
 
     OScene::Scene scene = OScene::Scene();
     OScene::GameObject *obj = new OScene::PointLight();
     obj->transform.translate(glm::vec3(1.0f, 234.0f, 14.0f));
-    scene.objects.push_back(obj);
-
-    OResource::RPak rpak = OResource::RPak("test.rpak");
-    OResource::manager.loadrpak(&rpak);
-    OResource::Resource *res = OResource::manager.get("misc/test.txt");
-    if (res->type == OResource::Resource::SOURCE_RPAK) {
-        char data[512];
-        res->rpak->read(res->path, data, res->rpakentry.uncompressedsize, 0);
-        printf("%s\n", data);
-    }
-
-    OResource::manager.create("misc/out.ktx2");
-    struct ORenderer::texture outtex = OResource::Texture::load("misc/out.ktx2");
+    scene.objects.push_back(obj); 
 
     // OUtils::HandlePointer<OResource::Resource> res = manager.create(OResource::Resource::TYPE_UNKNOWN, "misc/test.res");
 

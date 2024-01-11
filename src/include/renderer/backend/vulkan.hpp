@@ -229,6 +229,10 @@ namespace OVulkan {
         size_t shadercount;
     };
 
+    struct sampler {
+        VkSampler sampler;
+    };
+
     template <typename T>
     class VulkanResource {
         public:
@@ -261,6 +265,7 @@ namespace OVulkan {
             std::map<size_t, VulkanResource<struct framebuffer>> framebuffers;
             std::map<size_t, VulkanResource<struct renderpass>> renderpasses;
             std::map<size_t, VulkanResource<struct pipelinestate>> pipelinestates;
+            std::map<size_t, VulkanResource<struct sampler>> samplers;
             size_t resourcehandle;
 
 
@@ -322,6 +327,7 @@ namespace OVulkan {
             uint8_t createrenderpass(struct ORenderer::renderpassdesc *desc, struct ORenderer::renderpass *pass);
             uint8_t createpipelinestate(struct ORenderer::pipelinestatedesc *desc, struct ORenderer::pipelinestate *state);
             uint8_t createcomputepipelinestate(struct ORenderer::computepipelinestatedesc *desc, struct ORenderer::pipelinestate *state);
+            uint8_t createsampler(struct ORenderer::samplerdesc *desc, struct ORenderer::sampler *sampler);
 
             // XXX: Think real hard about everything, how do I want to go about it?
             // Probably anything synchronous (on demand and not related to a command "stream") should be put here as we want our changes to be reflected immediately rather than have them appear at a later date.
@@ -342,6 +348,13 @@ namespace OVulkan {
             void destroyframebuffer(struct ORenderer::framebuffer *framebuffer);
             void destroyrenderpass(struct ORenderer::renderpass *pass);
             void destroypipelinestate(struct ORenderer::pipelinestate *state);
+
+            void setdebugname(struct ORenderer::texture texture, const char *name);
+            void setdebugname(struct ORenderer::textureview view, const char *name);
+            void setdebugname(struct ORenderer::buffer buffer, const char *name);
+            void setdebugname(struct ORenderer::framebuffer framebuffer, const char *name);
+            void setdebugname(struct ORenderer::renderpass renderpass, const char *name);
+            void setdebugname(struct ORenderer::pipelinestate state, const char *name);
 
             void adjustprojection(glm::mat4 *mtx) {
                 (*mtx)[1][1] *= -1; // Vulkan has an inverted Y
