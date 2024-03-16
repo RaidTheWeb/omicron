@@ -15,6 +15,23 @@
 #include <glm/gtx/matrix_decompose.hpp>
 #include <math.h>
 
+namespace OMath {
 
+    class Sphere {
+        public:
+            Sphere(void) { }
+            Sphere(float x, float y, float z, float radius) {
+                this->pos = glm::vec3(x, y, z);
+                this->radius = radius;
+            }
+            Sphere(glm::vec3 pos, float radius) {
+                this->pos = pos;
+                this->radius = radius;
+            }
+
+            glm::vec3 pos;
+            float radius;
+    };
+}
 
 #endif

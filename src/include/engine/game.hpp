@@ -3,8 +3,8 @@
 
 #include <engine/input.hpp>
 #include <engine/model.hpp>
-#include <resources/resource.hpp>
-#include <scripting/script.hpp>
+#include <engine/resources/resource.hpp>
+#include <engine/scripting/script.hpp>
 
 // game object generic type
 struct game_object {

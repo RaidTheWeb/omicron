@@ -7,6 +7,10 @@ pak/
 pk2/
 temp/
 textures/
+utils/rpak
+misc/
+*.osce
+*.omod
 **.so
 **.so.**
 **.o

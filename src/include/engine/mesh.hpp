@@ -3,10 +3,10 @@
 
 #include <assimp/scene.h>
 #include <engine/math.hpp>
-#include <renderer/camera.hpp>
-#include <renderer/envmap.hpp>
-#include <renderer/renderer.hpp>
-#include <utils.hpp>
+#include <engine/renderer/camera.hpp>
+#include <engine/renderer/envmap.hpp>
+#include <engine/renderer/renderer.hpp>
+#include <engine/utils.hpp>
 
 struct mesh_vertex {
     glm::vec3 pos;

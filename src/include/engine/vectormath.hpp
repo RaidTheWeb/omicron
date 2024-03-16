@@ -1,0 +1,5 @@
+#ifndef _ENGINE__VECTORMATH_HPP
+#define _ENGINE__VECTORMATH_HPP
+
+
+#endif

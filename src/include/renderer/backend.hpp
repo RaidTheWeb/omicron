@@ -1,5 +1,0 @@
-#ifndef _RENDERER__BACKEND_HPP
-#define _RENDERER__BACKEND_HPP
-
-
-#endif

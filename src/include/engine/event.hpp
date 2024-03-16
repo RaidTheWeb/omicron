@@ -1,9 +1,9 @@
 #ifndef _ENGINE__EVENT_HPP
 #define _ENGINE__EVENT_HPP
 
-#include <concurrency/job.hpp>
+#include <engine/concurrency/job.hpp>
 #include <pthread.h>
-#include <utils/queue.hpp>
+#include <engine/utils/queue.hpp>
 #include <stdint.h>
 
 #define EVENT_MAXARGS 8

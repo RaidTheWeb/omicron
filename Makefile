@@ -30,7 +30,7 @@ LDFLAGS = -lglfw \
 
 HEADERS = $(shell find $(SOURCE_DIR)/include -type f -name '*.hpp')
 SOURCES = $(shell find $(SOURCE_DIR) -type f -name '*.cpp')
-SHADERS = $(shell find $(SOURCE_DIR)/shaders -type f -name '*.glsl')
+SHADERS = $(shell find $(SOURCE_DIR)/engine/shaders -type f -name '*.glsl')
 OSHADERS = $(SHADERS:.glsl=.spv)
 OBJECTS = $(SOURCES:.cpp=.o)
 
@@ -53,18 +53,18 @@ endif
 
 all: utils $(OSHADERS) $(BIN_DIR)/$(OUT)
 
-run: shaders $(BIN_DIR)/$(OUT)
-	@$(BIN_DIR)/$(OUT)
+run: $(OSHADERS) $(BIN_DIR)/$(OUT)
+	@bash run.sh
 
 utils: utils/rpak
-	
+
 utils/rpak: utils/rpak.c
 	@echo "Compiling utils/rpak"
 	@$(CC) -o utils/rpak utils/rpak.c -lz
 
 %.spv: %.glsl
 	@printf "Compiling GLSL shader %s to Vulkan SPIRV\n" $^
-	@glslc -fshader-stage=$(shell python3 src/shaders/getshaderstage.py $^) -o $@ $^ 
+	@glslc -fshader-stage=$(shell python3 src/engine/shaders/getshaderstage.py $^) -o $@ $^ 
 
 $(BIN_DIR)/$(OUT): $(OBJECTS)
 	@printf "%8s %-40s %s %s\n" $(CXX) $@ "$(CFLAGS)" "$(LDFLAGS)"

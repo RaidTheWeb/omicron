@@ -7,7 +7,7 @@
 #include <GLFW/glfw3native.h>
 #endif
 #include <engine/math.hpp>
-#include <renderer/renderer.hpp>
+#include <engine/renderer/renderer.hpp>
 
 struct engine {
     glm::vec2 winsize;

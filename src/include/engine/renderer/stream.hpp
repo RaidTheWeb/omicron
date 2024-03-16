@@ -1,0 +1,4 @@
+#ifndef _ENGINE__RENDERER__STREAM_HPP
+#define _ENGINE__RENDERER__STREAM_HPP
+
+#endif

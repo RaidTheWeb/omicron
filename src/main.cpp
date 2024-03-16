@@ -1,48 +1,39 @@
-#include <renderer/camera.hpp>
-#include <concurrency/job.hpp>
+#include <engine/renderer/camera.hpp>
+#include <engine/concurrency/job.hpp>
 #include <engine/engine.hpp>
 #include <engine/math.hpp>
-#include <renderer/envmap.hpp>
+#include <engine/renderer/envmap.hpp>
 #include <engine/game.hpp>
 #include <GLFW/glfw3.h>
 #ifdef __linux__
 #define GLFW_EXPOSE_NATIVE_X11
 #include <GLFW/glfw3native.h>
 #endif
-#include <light.hpp>
+#include <engine/light.hpp>
 #include <engine/matrix.hpp>
-#include <engine/model.hpp>
-#include <renderer/renderer.hpp>
-#include <resources/resource.hpp>
+#include <engine/renderer/renderer.hpp>
+#include <engine/resources/resource.hpp>
 #include <stdio.h>
 #include <string.h>
-#include <utils.hpp>
+#include <engine/renderer/backend/vulkan.hpp>
+#include <engine/renderer/pipeline/pbrpipeline.hpp>
 
-// XXX: precision issues could be solved with moving world physical positions back (i'd have to make sure positions are properly separated by world position and real position (real being what is used in rendering calculations), real position would be adjusted based on player position)
+#include <engine/resources/rpak.hpp>
+#include <engine/resources/texture.hpp>
+#include <engine/renderer/mesh.hpp>
 
-// TODO: Physics need to run at a high tickrate, render at V-sync (or otherwise), and other less important things like AI will update at a low tickrate. To do all this the worker thread must kick these threads at the right time. Otherwise, a thread system will have to be used per-system to allow synchronisation to differ (although, jobs will still have to synchronise and wait for each other to complete or else things can go wrong). Integrating with a job system would work well with having the master thread run at the highest possible tickrate and only kick jobs that run at a lower tickrate on intervals.
-// TODO: Animation system (bone animation)
-// TODO: Physics (bullet physics? jolt physics? roll my own?)
-// TODO: Audio system (3D audio, preferrably)
-// TODO: World data format (chunk-based)
-// TODO: World data streaming from chunks
-// TODO: AI system (control flow state machine? task based? navigation meshes baked or dynamic? how efficient is all this?)
-// XXX: Bindless resources?
-// XXX: Dynamic draw call merging? (works with the bindless resources to massively reduce CPU time (allows for all sorts of GPU mesh optimisations as well!))
-// TODO: Volumetric scattering. LUT amortised over 32 frames (a lot more efficient) 3D texture of light scattering per view froxel (3D texture is 160x90x64 froxels of 12x12), light scattering is composed on top of rendered frame by sampling 3D texture by depth (this step is before tonemapping and other post processing operations (this volumetric scattering step should be composed immediately before post processing))
-// TODO: UI system, composed on rendered image after post processing, can use its own post processing pipeline for visual effects
-// TODO: Shadow caching (we have shadowing for both static and dynamic geometry with dynamic geometry being composited on pre-cached static geometry shadow map (less objects to draw means less GPU time spent on rendering shadow maps))
+#include <engine/scene/partition.hpp>
+#include <engine/scene/scene.hpp>
+#include <engine/utils/containers.hpp>
+#include <engine/utils/pointers.hpp>
 
-#include <renderer/backend/vulkan.hpp>
-#include <renderer/pipeline/pbrpipeline.hpp>
+#include <engine/resources/model.hpp>
 
-#include <resources/rpak.hpp>
-#include <resources/texture.hpp>
-#include <renderer/mesh.hpp>
+#include <engine/resources/serialise.hpp>
 
-#include <scene/scene.hpp>
-#include <utils/containers.hpp>
-#include <utils/pointers.hpp>
+#include <engine/utils/reflection.hpp>
+
+extern OScene::Scene scene;
 
 int main(int argc, const char **argv) {
     engine_engine = (struct engine *)malloc(sizeof(struct engine));
@@ -80,10 +71,64 @@ int main(int argc, const char **argv) {
     PBRPipeline pipeline = PBRPipeline();
     pipeline.init();
 
-    OScene::Scene scene = OScene::Scene();
-    OScene::GameObject *obj = new OScene::PointLight();
-    obj->transform.translate(glm::vec3(1.0f, 234.0f, 14.0f));
-    scene.objects.push_back(obj); 
+    // OResource::Model::fromassimp("misc/Scene.glb", "misc/testscene.omod");
+
+    OScene::Scene scene2 = OScene::Scene();
+    OScene::GameObject *obj = OScene::GameObject::create<OScene::GameObject>();
+    obj->scene = &scene2;
+    obj->translate(glm::vec3(0.0f, 0.0f, 0.0f));
+    scene2.objects.push_back(obj->gethandle());
+
+    OScene::GameObject *model = OScene::GameObject::create<OScene::ModelInstance>();
+    model->scene = &scene2;
+    model->parent = obj->gethandle();
+    obj->children.push_back(model->gethandle());
+    model->translate(glm::vec3(2.0f, 1.0f, 0.0f));
+    ((OScene::ModelInstance *)model)->model = ORenderer::Model("misc/testscene.omod");
+    ((OScene::ModelInstance *)model)->modelpath = "misc/testscene.omod";
+    scene2.objects.push_back(model->gethandle());
+    // ((OScene::ModelInstance *)model)->model.meshes[0].material.base.texture = OResource::Texture::load("misc/out.ktx2");
+    // struct ORenderer::textureviewdesc viewdesc = { };
+    // viewdesc.texture = ((OScene::ModelInstance *)model)->model.meshes[0].material.base.texture;
+    // viewdesc.type = ORenderer::IMAGETYPE_2D;
+    // viewdesc.aspect = ORenderer::ASPECT_COLOUR;
+    // viewdesc.format = ORenderer::FORMAT_RGBA8SRGB;
+    // viewdesc.mipcount = 1;
+    // viewdesc.baselayer = 0;
+    // viewdesc.layercount = 1;
+    // viewdesc.basemiplevel = 0;
+    // ORenderer::context->createtextureview(&viewdesc, &((OScene::ModelInstance *)model)->model.meshes[0].material.base.view);
+    // scene.objects.push_back(model);
+
+    model = OScene::GameObject::create<OScene::ModelInstance>();
+    model->scene = &scene2;
+    model->parent = obj->gethandle();
+    obj->children.push_back(model->gethandle());
+    // model->transform.parent = obj->gethandle();
+    model->translate(glm::vec3(0.0f, 1.0f, 0.0f));
+    ((OScene::ModelInstance *)model)->model = ORenderer::Model("misc/testscene.omod");
+    ((OScene::ModelInstance *)model)->modelpath = "misc/testscene.omod";
+    scene2.objects.push_back(model->gethandle());
+    // ((OScene::ModelInstance *)model)->model.meshes[0].material.base.texture = OResource::Texture::load("misc/out2.ktx2");
+    // viewdesc.texture = ((OScene::ModelInstance *)model)->model.meshes[0].material.base.texture;
+    // viewdesc.type = ORenderer::IMAGETYPE_2D;
+    // viewdesc.aspect = ORenderer::ASPECT_COLOUR;
+    // viewdesc.format = ORenderer::FORMAT_RGBA8SRGB;
+    // viewdesc.mipcount = 1;
+    // viewdesc.baselayer = 0;
+    // viewdesc.layercount = 1;
+    // viewdesc.basemiplevel = 0;
+    // ORenderer::context->createtextureview(&viewdesc, &((OScene::ModelInstance *)model)->model.meshes[0].material.base.view);
+    // scene.objects.push_back(model);
+
+    OScene::setupreflection();
+
+    scene2.save("saved.osce");
+    scene.load("saved.osce");
+
+    // OResource::manager.create("misc/test.omod");
+    // OResource::Model m = OResource::Model("misc/testscene.omod");
+
 
     // OUtils::HandlePointer<OResource::Resource> res = manager.create(OResource::Resource::TYPE_UNKNOWN, "misc/test.res");
 

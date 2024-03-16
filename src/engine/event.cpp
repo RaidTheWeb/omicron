@@ -1,5 +1,5 @@
 #include <engine/event.hpp>
-#include <utils/memory.hpp>
+#include <engine/utils/memory.hpp>
 
 OUtils::MPMCQueue event_events = OUtils::MPMCQueue(256); // event queue
 OJob::Mutex event_listenermutex; // spinlock so synchronisation doesn't break

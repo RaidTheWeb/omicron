@@ -5,9 +5,9 @@
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 #include <engine/mesh.hpp>
-#include <renderer/camera.hpp>
-#include <renderer/renderer.hpp>
-#include <utils.hpp>
+#include <engine/renderer/camera.hpp>
+#include <engine/renderer/renderer.hpp>
+#include <engine/utils.hpp>
 
 struct model {
     VECTOR_TYPE(struct mesh *) meshes;
