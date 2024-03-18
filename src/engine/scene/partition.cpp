@@ -1,8 +1,30 @@
+#include <engine/math/bounds.hpp>
 #include <engine/scene/partition.hpp>
 
 namespace OScene {
+    #define PARTITION_CELLSIZE 300.0f
+
+    static bool checkboundswithcell(ParitionManager *manager, Cell *cell, OUtils::Handle<GameObject> obj) {
+        OUtils::Handle<ModelInstance> model = OUtils::Handle<ModelInstance>(obj);
+        OMath::AABB aabb = model->model.bounds;
+        aabb.translate(obj->getglobalposition()); // Transform from object oriented to world position
+        OMath::AABB cellbb = OMath::AABB(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(PARTITION_CELLSIZE, PARTITION_CELLSIZE, PARTITION_CELLSIZE));
+        cellbb.translate(cell->header.origin);
+
+        printf("%f %f %f to %f %f %f\n compared to %f %f %f to %f %f %f\n", aabb.min.x, aabb.min.y, aabb.min.z, aabb.max.x, aabb.max.y, aabb.max.z, cellbb.min.x, cellbb.min.y, cellbb.min.z, cellbb.max.x, cellbb.max.y, cellbb.max.z);
+
+        OMath::AABB intersection = cellbb.intersection(aabb); // Find the intersection between the two
+        printf("intersection between: %f %f %f to %f %f %f\n", intersection.min.x, intersection.min.y, intersection.min.z, intersection.max.x, intersection.max.y, intersection.max.z);
+        if (intersection == aabb) { // If they are equal that means that our AABB is exactly inside the cell.
+            printf("fits inside cell.\n");
+            return true;
+        }
+        printf("intersects across cell.\n");
+        return false; // Otherwise it does actually sit partially outside.
+    }
 
     void ParitionManager::addtocell(Cell *cell, OUtils::Handle<GameObject> obj) {
+        const bool big = obj->flags & GameObject::IS_MODEL ? !checkboundswithcell(this, cell, obj) : false;
         Cell *head = cell->header.prev != NULL ? this->map[cell->header.cellpos] : cell; // Head of our cell list
 
         if (cell->header.count < cell->COUNT - 1) { // This header has a free spot somewhere
@@ -73,7 +95,7 @@ namespace OScene {
     void ParitionManager::add(OUtils::Handle<GameObject> obj) {
         ASSERT(obj.isvalid(), "Attempted to register invalid object to partition system.\n");
         Cell *icell = NULL;
-        const glm::ivec3 cellpos = obj->getglobalposition() * (1 / 300.0f);
+        const glm::ivec3 cellpos = obj->getglobalposition() * (1 / PARTITION_CELLSIZE);
         if (this->map.find(cellpos) != this->map.end()) { // XXX: Rework this so we only have one call to do
             glm::vec3 pos = obj->getglobalposition();
             icell = this->map[cellpos]; // Retrieve head of cell page list
@@ -84,7 +106,7 @@ namespace OScene {
             for (size_t i = 0; i < cell->COUNT; i++) {
                 cell->objects[i] = SCENE_INVALIDHANDLE;
             }
-            cell->header.origin = (pos * (1 / 300.0f)) * 300.0f; // Convert to cell coordinates and back to lose precision
+            cell->header.origin = (pos * (1 / PARTITION_CELLSIZE)) * PARTITION_CELLSIZE; // Convert to cell coordinates and back to lose precision
             cell->header.cellpos = cellpos;
             cell->header.next = NULL;
             cell->header.prev = NULL;
@@ -149,7 +171,7 @@ namespace OScene {
             return;
         }
 
-        glm::ivec3 current = obj->getglobalposition() * (1 / 300.0f);
+        glm::ivec3 current = obj->getglobalposition() * (1 / PARTITION_CELLSIZE);
         if (current == obj->culldata.cellpos) {
             return; // Literally no need to update the position of the object in our system as nothing has changed (and it would be a waste of cycles to go through the whole remove+add routine).
         }

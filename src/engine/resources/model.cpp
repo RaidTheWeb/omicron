@@ -56,6 +56,7 @@ namespace OResource {
             ASSERT(this->meshes != NULL, "Failed to allocate memory for model meshes.\n");
             for (size_t i = 0; i < this->header.nummesh; i++) {
                 this->meshes[i].header = meshheaders[i];
+                this->bounds.merge(OMath::AABB(meshheaders[i].bmin, meshheaders[i].bmax));
                 this->meshes[i].vertices = (struct mesh::vertex *)malloc(sizeof(struct mesh::vertex) * this->meshes[i].header.vertexcount);
                 ASSERT(this->meshes[i].vertices != NULL, "Failed to allocate memory for mesh vertices.\n");
                 this->meshes[i].indices = (uint16_t *)malloc(sizeof(uint16_t) * this->meshes[i].header.indexcount);
@@ -116,6 +117,7 @@ namespace OResource {
             ASSERT(this->meshes != NULL, "Failed to allocate memory for model meshes.\n");
             for (size_t i = 0; i < this->header.nummesh; i++) {
                 this->meshes[i].header = meshheaders[i];
+                this->bounds.merge(OMath::AABB(meshheaders[i].bmin, meshheaders[i].bmax));
                 this->meshes[i].vertices = (struct mesh::vertex *)malloc(sizeof(struct mesh::vertex) * this->meshes[i].header.vertexcount);
                 ASSERT(this->meshes[i].vertices != NULL, "Failed to allocate memory for mesh vertices.\n");
                 this->meshes[i].indices = (uint16_t *)malloc(sizeof(uint16_t) * this->meshes[i].header.indexcount);
@@ -194,7 +196,8 @@ namespace OResource {
                 omesh.header.material = id;
                 materials->push_back(omaterial);
             }
-
+            omesh.header.bmin = glm::vec3(mesh->mAABB.mMin.x, mesh->mAABB.mMin.y, mesh->mAABB.mMin.z);
+            omesh.header.bmax = glm::vec3(mesh->mAABB.mMax.x, mesh->mAABB.mMax.y, mesh->mAABB.mMax.z);
             output->push_back(omesh);
         }
 
@@ -222,6 +225,7 @@ namespace OResource {
             aiProcess_FindInstances |
             aiProcess_ValidateDataStructure |
             aiProcess_FindInvalidData |
+            aiProcess_GenBoundingBoxes | // Generate AABBs per mesh
             aiProcess_OptimizeMeshes;
         const aiScene *scene = aiImportFile(path, defaultflags);
         ASSERT(scene != NULL && !(scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) && scene->mRootNode != NULL, "Failed to import model with assimp error: `%s`.\n", aiGetErrorString());
@@ -241,6 +245,7 @@ namespace OResource {
 
         ASSERT(fwrite(&header, sizeof(struct header), 1, f), "Failed to write OMod model header.\n");
         for (size_t i = 0; i < header.nummaterial; i++) {
+            strcpy(materials[i].base, "misc/out2.ktx2");
             ASSERT(fwrite(&materials[i], sizeof(struct material), 1, f), "Failed to write OMod material.\n");
         }
 
@@ -248,7 +253,7 @@ namespace OResource {
 
         for (size_t i = 0; i < header.nummesh; i++) {
             meshes[i].header.offset = approxoff;
-            ASSERT(fwrite(&meshes[i].header, sizeof(struct meshhdr), 1, f), "Faield to write OMod mesh header.\n");
+            ASSERT(fwrite(&meshes[i].header, sizeof(struct meshhdr), 1, f), "Failed to write OMod mesh header.\n");
             approxoff += (sizeof(struct mesh::vertex) * meshes[i].header.vertexcount) + (sizeof(uint16_t) * meshes[i].header.indexcount);
         }
         
@@ -258,6 +263,9 @@ namespace OResource {
             free(meshes[i].vertices);
             free(meshes[i].indices);
         }
+
+        fseek(f, 0, SEEK_SET);
+        fwrite(&header, sizeof(struct header), 1, f); // Update header with new info
 
         fclose(f);
     }

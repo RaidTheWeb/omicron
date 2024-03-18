@@ -1,7 +1,7 @@
 #ifndef _ENGINE__MATRIX_HPP
 #define _ENGINE__MATRIX_HPP
 
-#include <engine/math.hpp>
+#include <engine/math/math.hpp>
 #include <stdbool.h>
 #include <string.h>
 //

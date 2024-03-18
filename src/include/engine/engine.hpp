@@ -6,7 +6,7 @@
 #define GLFW_EXPOSE_NATIVE_X11
 #include <GLFW/glfw3native.h>
 #endif
-#include <engine/math.hpp>
+#include <engine/math/math.hpp>
 #include <engine/renderer/renderer.hpp>
 
 struct engine {

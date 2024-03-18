@@ -2,7 +2,7 @@
 #define _ENGINE__MESH_HPP
 
 #include <assimp/scene.h>
-#include <engine/math.hpp>
+#include <engine/math/math.hpp>
 #include <engine/renderer/camera.hpp>
 #include <engine/renderer/envmap.hpp>
 #include <engine/renderer/renderer.hpp>

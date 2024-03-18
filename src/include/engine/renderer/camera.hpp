@@ -2,7 +2,7 @@
 #define _ENGINE__CAMERA_HPP
 
 // what even?
-#include <engine/math.hpp>
+#include <engine/math/math.hpp>
 #include <engine/renderer/renderer.hpp>
 
 struct camera {

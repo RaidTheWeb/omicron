@@ -1,7 +1,8 @@
 #ifndef _ENGINE__RESOURCES__MODEL_HPP
 #define _ENGINE__RESOURCES__MODEL_HPP
 
-#include <engine/math.hpp>
+#include <engine/math/bounds.hpp>
+#include <engine/math/math.hpp>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -41,9 +42,11 @@ namespace OResource {
                 uint32_t material; // material ID
                 uint32_t vertexcount;
                 uint32_t indexcount;
+                glm::vec3 bmin;
+                glm::vec3 bmax;
 
                 size_t offset; // offset of vertex data followed by index data
-            } __attribute__((packed));
+            };
 
             struct mesh {
                 struct meshhdr header;
@@ -54,7 +57,7 @@ namespace OResource {
                     glm::vec3 normal;
                     glm::vec3 tangent;
                     glm::vec3 bitangent;
-                };
+                }; 
 
                 struct vertex *vertices;
                 uint16_t *indices;
@@ -64,11 +67,12 @@ namespace OResource {
                 char magic[5]; // OMOD\0
                 uint32_t nummesh; // number of meshes
                 uint32_t nummaterial; // number of materials
-            } __attribute__((packed));
+            };
 
             struct header header;
             struct mesh *meshes;
             struct material *materials;
+            OMath::AABB bounds;
 
             Model(const char *path);
             ~Model(void) {

@@ -1,18 +1,87 @@
 #ifndef _ENGINE__BOUNDS_HPP
 #define _ENGINE__BOUNDS_HPP
 
-#include <engine/math.hpp>
+#include <engine/math/math.hpp>
 #include <engine/matrix.hpp>
+#include <stdio.h>
 #include <string.h>
 
-struct aabb {
-    glm::vec3 min;
-    glm::vec3 max;
-};
+// XXX: Notes: using references will reduce memory operations like copies when passing a variable in as an argument
 
-struct sphere {
-    glm::vec3 pos;
-    float radius;
+namespace OMath {
+
+    class AABB {
+        public:
+            glm::vec3 min = glm::vec3(0.0f);
+            glm::vec3 max = glm::vec3(0.0f);
+           
+            AABB(void) { }
+            AABB(glm::vec3 min, glm::vec3 max) {
+                this->min = min;
+                this->max = max;
+            }
+
+            glm::vec3 mincoords(glm::vec3 a, glm::vec3 b) {
+                return glm::vec3(glm::min(a.x, b.x), glm::min(a.y, b.y), glm::min(a.z, b.z));
+            }
+
+            glm::vec3 maxcoords(glm::vec3 a, glm::vec3 b) {
+                return glm::vec3(glm::max(a.x, b.x), glm::max(a.y, b.y), glm::max(a.z, b.z));
+            }
+
+            // Modify AABB to emcompass a point.
+            void addpt(glm::vec3 point) {
+                this->min = this->mincoords(point, this->min);
+                this->max = this->maxcoords(point, this->max);
+            }
+
+            // Merge this AABB with another (modify bounds to emcompass the points of the AABB).
+            void merge(AABB rhs) {
+                this->addpt(rhs.min);
+                this->addpt(rhs.max);
+            }
+
+            // Check if AABB contains a point.
+            bool contains(glm::vec3 point) {
+                if (this->min.x > point.x || this->min.y > point.y || this->min.z > point.z) {
+                    return false;
+                }
+                if (this->max.x < point.x || this->max.y < point.y || this->max.z < point.z) {
+                    return false;
+                }
+                return true;
+            }
+
+            // Check if AABB intersects with another AABB.
+            bool intersects(AABB rhs) {
+                if (this->min.x > rhs.max.x || this->min.y > rhs.max.y || this->min.z > rhs.max.z) {
+                    return false;
+                }
+                if (this->max.x < rhs.min.x || this->max.y < rhs.min.y || this->max.z < rhs.min.z) {
+                    return false;
+                }
+                return true;
+            }
+
+            constexpr bool operator ==(AABB &rhs) {
+                return this->min == rhs.min && this->max == rhs.max;
+            }
+
+            constexpr bool operator !=(AABB &rhs) {
+                return this->min != rhs.min || this->max != rhs.max;
+            }
+
+            // Create AABB that represents the intersecting area between two AABBs.
+            AABB intersection(AABB rhs) {
+                return AABB(glm::max(rhs.min, this->min), glm::min(rhs.max, this->max));
+            }
+
+            // Translate AABB position.
+            void translate(glm::vec3 v) {
+                this->min += v;
+                this->max += v;
+            }
+    };
 };
 
 // enum {

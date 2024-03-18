@@ -2,7 +2,7 @@
 #define _ENGINE__INPUT_HPP
 
 #include <GLFW/glfw3.h>
-#include <engine/math.hpp>
+#include <engine/math/math.hpp>
 #include <stdbool.h>
 #include <stdint.h>
 

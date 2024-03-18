@@ -1,7 +1,7 @@
 #ifndef _ENGINE__SCENE__PARTITION_HPP
 #define _ENGINE__SCENE__PARTITION_HPP
 
-#include <engine/math.hpp>
+#include <engine/math/math.hpp>
 #include <engine/scene/gameobject.hpp>
 
 namespace OScene {
@@ -45,6 +45,7 @@ namespace OScene {
                 glm::ivec3 cellpos; // cell position in grid (for searching)
                 uint32_t count; // number of objects in this cell
                 size_t id; // unique ID given on cell creation
+                bool big; // Contains an object whose bounds exceeds the cell
             };
 
             struct header header;
@@ -66,6 +67,7 @@ namespace OScene {
     class ParitionManager {
         public:
             std::unordered_map<glm::ivec3, Cell *, CellDescHasher> map;
+            std::vector<Cell *> containsbig; // Contains an object whose bounds extend beyond the range of a single cell
             OUtils::PoolAllocator cellallocator = OUtils::PoolAllocator(sizeof(Cell), 1024, 128);
             CellDescHasher hasher;
             std::atomic<size_t> idcounter = 1; // Start at one so a zeroed out cell can never be valid

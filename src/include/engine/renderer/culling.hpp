@@ -1,7 +1,7 @@
 #ifndef _ENGINE__RENDERER__CULLING_HPP
 #define _ENGINE__RENDERER__CULLING_HPP
 
-#include <engine/math.hpp>
+#include <engine/math/math.hpp>
 #include <engine/utils/memory.hpp>
 
 // https://www.beosil.com/download/CollisionDetectionHashing_VMV03.pdf

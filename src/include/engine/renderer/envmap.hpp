@@ -1,7 +1,7 @@
 #ifndef _ENGINE__ENVMAP_HPP
 #define _ENGINE__ENVMAP_HPP
 
-#include <engine/math.hpp>
+#include <engine/math/math.hpp>
 #include <engine/resources/resource.hpp>
 #include <engine/utils.hpp>
 

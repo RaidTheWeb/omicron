@@ -1,7 +1,7 @@
 #ifndef _ENGINE__RENDERER__RENDERER_HPP
 #define _ENGINE__RENDERER__RENDERER_HPP
 
-#include <engine/math.hpp>
+#include <engine/math/math.hpp>
 #include <map>
 #include <engine/resources/resource.hpp>
 #include <engine/utils.hpp>

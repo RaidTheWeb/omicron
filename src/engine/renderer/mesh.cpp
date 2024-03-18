@@ -258,11 +258,12 @@ namespace ORenderer {
         viewdesc.layercount = 1;
         viewdesc.basemiplevel = 0;
         ORenderer::context->createtextureview(&viewdesc, &this->material.base.view);
-
+        this->bounds = OMath::AABB(mesh->header.bmin, mesh->header.bmax);
     }
 
     Model::Model(const char *path) {
         OResource::Model model = OResource::Model(path);
+        this->bounds = model.bounds;
         for (size_t i = 0; i < model.header.nummesh; i++) {
             this->meshes.push_back(Mesh(&model.meshes[i], &model.materials[model.meshes[i].header.material]));
         }

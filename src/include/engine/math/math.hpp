@@ -1,5 +1,5 @@
-#ifndef _ENGINE__MATH_HPP
-#define _ENGINE__MATH_HPP
+#ifndef _ENGINE__MATH__MATH_HPP
+#define _ENGINE__MATH__MATH_HPP
 
 // TODO: Just transform to left handed whenever we want to (although, BGFX does seem to like left handedness)
 // #define CGLM_FORCE_LEFT_HANDED
@@ -20,10 +20,6 @@ namespace OMath {
     class Sphere {
         public:
             Sphere(void) { }
-            Sphere(float x, float y, float z, float radius) {
-                this->pos = glm::vec3(x, y, z);
-                this->radius = radius;
-            }
             Sphere(glm::vec3 pos, float radius) {
                 this->pos = pos;
                 this->radius = radius;

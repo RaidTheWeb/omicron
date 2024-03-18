@@ -18,6 +18,7 @@ namespace ORenderer {
                 glm::vec3 bitangent;
             }; // this should be aligned
 
+            OMath::AABB bounds;
             std::vector<struct vertex> vertices;
             std::vector<uint16_t> indices;
             struct buffer vertexbuffer;
@@ -54,6 +55,7 @@ namespace ORenderer {
                 IMPORT_OPTIMISE = (1 << 0)
             };
 
+            OMath::AABB bounds;
             std::vector<Mesh> meshes;
 
             Model(void) { };

@@ -1,7 +1,7 @@
 #include <engine/renderer/camera.hpp>
 #include <engine/concurrency/job.hpp>
 #include <engine/engine.hpp>
-#include <engine/math.hpp>
+#include <engine/math/math.hpp>
 #include <engine/renderer/envmap.hpp>
 #include <engine/game.hpp>
 #include <GLFW/glfw3.h>
@@ -20,7 +20,6 @@
 
 #include <engine/resources/rpak.hpp>
 #include <engine/resources/texture.hpp>
-#include <engine/renderer/mesh.hpp>
 
 #include <engine/scene/partition.hpp>
 #include <engine/scene/scene.hpp>
@@ -83,9 +82,9 @@ int main(int argc, const char **argv) {
     model->scene = &scene2;
     model->parent = obj->gethandle();
     obj->children.push_back(model->gethandle());
-    model->translate(glm::vec3(2.0f, 1.0f, 0.0f));
     ((OScene::ModelInstance *)model)->model = ORenderer::Model("misc/testscene.omod");
     ((OScene::ModelInstance *)model)->modelpath = "misc/testscene.omod";
+    model->translate(glm::vec3(2.0f, 1.0f, 0.0f));
     scene2.objects.push_back(model->gethandle());
     // ((OScene::ModelInstance *)model)->model.meshes[0].material.base.texture = OResource::Texture::load("misc/out.ktx2");
     // struct ORenderer::textureviewdesc viewdesc = { };
@@ -105,9 +104,9 @@ int main(int argc, const char **argv) {
     model->parent = obj->gethandle();
     obj->children.push_back(model->gethandle());
     // model->transform.parent = obj->gethandle();
-    model->translate(glm::vec3(0.0f, 1.0f, 0.0f));
     ((OScene::ModelInstance *)model)->model = ORenderer::Model("misc/testscene.omod");
     ((OScene::ModelInstance *)model)->modelpath = "misc/testscene.omod";
+    model->translate(glm::vec3(2.0f, 1.0f, 1.0f));
     scene2.objects.push_back(model->gethandle());
     // ((OScene::ModelInstance *)model)->model.meshes[0].material.base.texture = OResource::Texture::load("misc/out2.ktx2");
     // viewdesc.texture = ((OScene::ModelInstance *)model)->model.meshes[0].material.base.texture;
