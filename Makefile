@@ -14,6 +14,9 @@ CFLAGS = -std=gnu++17 -I$(SOURCE_DIR)/include -I$(SOURCE_DIR)/ \
 		 -Ilibs/KTX-Software/include \
 		 -Ilibs/glfw/include \
 		 -Ilibs/assimp/include \
+		 -Ilibs/tracy/public/ \
+		 -Ilibs/imgui \
+		 -Ilibs/im3d \
 		 -Lrt/ \
 		 -DOMICRON_VERSION=$(VERSION)
 		 # -Llibs/meshoptimizer/build \
@@ -28,8 +31,15 @@ LDFLAGS = -lglfw \
 		  -lGL \
 		  -lm \
 
+
+DEBUG ?= 1
+
 HEADERS = $(shell find $(SOURCE_DIR)/include -type f -name '*.hpp')
-SOURCES = $(shell find $(SOURCE_DIR) -type f -name '*.cpp')
+SOURCES = $(shell find $(SOURCE_DIR) -type f -name '*.cpp') libs/imgui/imgui.cpp libs/imgui/imgui_draw.cpp libs/imgui/imgui_tables.cpp libs/imgui/imgui_widgets.cpp libs/tracy/public/TracyClient.cpp
+
+ifeq ($(strip $(DEBUG)), 1)
+	CFLAGS += -DTRACY_ENABLE=1 -DTRACY_FIBERS
+endif
 SHADERS = $(shell find $(SOURCE_DIR)/engine/shaders -type f -name '*.glsl')
 OSHADERS = $(SHADERS:.glsl=.spv)
 OBJECTS = $(SOURCES:.cpp=.o)
@@ -40,8 +50,6 @@ ifeq ($(strip $(OMICRON_RENDERBACKEND)), vulkan)
 else ifeq ($(strip $(OMICRON_RENDERBACKEND)), opengl)
 	CFLAGS += -DOMICRON_RENDEROPENGL=1
 endif
-
-DEBUG ?= 1
 
 ifeq ($(strip $(DEBUG)), 1)
 	CFLAGS += -g -DOMICRON_DEBUG=1
@@ -64,7 +72,7 @@ utils/rpak: utils/rpak.c
 
 %.spv: %.glsl
 	@printf "Compiling GLSL shader %s to Vulkan SPIRV\n" $^
-	@glslc -fshader-stage=$(shell python3 src/engine/shaders/getshaderstage.py $^) -o $@ $^ 
+	@glslc -I src/engine/shaders -fshader-stage=$(shell python3 src/engine/shaders/getshaderstage.py $^) -o $@ $^
 
 $(BIN_DIR)/$(OUT): $(OBJECTS)
 	@printf "%8s %-40s %s %s\n" $(CXX) $@ "$(CFLAGS)" "$(LDFLAGS)"

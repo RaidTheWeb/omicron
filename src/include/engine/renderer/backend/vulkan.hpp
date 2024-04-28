@@ -55,7 +55,7 @@
     VK_IMPORT_INSTANCE_FUNC(true, vkGetPhysicalDeviceSurfacePresentModesKHR); \
     VK_IMPORT_INSTANCE_FUNC(true, vkGetPhysicalDeviceSurfaceSupportKHR); \
     VK_IMPORT_INSTANCE_FUNC(true, vkDestroySurfaceKHR); \
-    VK_IMPORT_INSTANCE_FUNC(true, vkGetPhysicalDeviceFeatures2KHR); \
+    VK_IMPORT_INSTANCE_FUNC(false, vkGetPhysicalDeviceFeatures2); \
     VK_IMPORT_INSTANCE_FUNC(true, vkGetPhysicalDeviceMemoryProperties2KHR); \
     VK_IMPORT_INSTANCE_FUNC(true, vkCreateDebugReportCallbackEXT); \
     VK_IMPORT_INSTANCE_FUNC(true, vkDestroyDebugReportCallbackEXT); \
@@ -170,6 +170,10 @@
     VK_IMPORT_DEVICE_FUNC(true,  vkCmdDrawIndirectCountKHR); \
     VK_IMPORT_DEVICE_FUNC(true,  vkCmdDrawIndexedIndirectCountKHR);
 
+
+#define TRACY_VK_USE_SYMBOL_TABLE
+#include <tracy/TracyVulkan.hpp>
+
 namespace OVulkan {
 
 #define VULKAN_MAXBACKBUFFERS 10
@@ -254,28 +258,11 @@ namespace OVulkan {
     };
 
     class VulkanContext;
-
-    class ScratchBuffer {
-        public:
-            struct ORenderer::buffer buffer;
-            struct ORenderer::buffermap map;
-            size_t size;
-            size_t pos;
-
-            ScratchBuffer(void) { };
-
-            void create(VulkanContext *ctx, size_t size, size_t count);
-            size_t write(const void *data, size_t size);
-            void flush(void);
-            void reset(void) {
-                this->pos = 0;
-            }
-            void destroy(void);
-
-    };
-
+ 
     class VulkanContext : public ORenderer::RendererContext {
         public:
+            TracyVkCtx tracyctx;
+
             VmaVulkanFunctions vmafunctions = { };
             VmaAllocator allocator = { };
             OJob::Mutex resourcemutex;
@@ -290,7 +277,7 @@ namespace OVulkan {
             std::unordered_map<size_t, VulkanResource<struct sampler>> samplers;
             size_t resourcehandle;
 
-            ScratchBuffer scratchbuffers[RENDERER_MAXLATENCY];
+            ORenderer::ScratchBuffer scratchbuffers[RENDERER_MAXLATENCY];
 
             VkPhysicalDevice phy;
             VkPhysicalDeviceProperties phyprops;
@@ -332,12 +319,15 @@ namespace OVulkan {
             // yes, that makes sense (and the vulkan render passes just gets the view resources shoved at them)
 
             VkCommandPool cmdpool;
-            VkCommandBuffer cmd[RENDERER_MAXLATENCY];
+            VkCommandBuffer cmd[RENDERER_MAXLATENCY + 1]; // With additional space for tracy cmd buffer
 
             VkSemaphore imagepresent[RENDERER_MAXLATENCY];
             VkSemaphore renderdone[RENDERER_MAXLATENCY];
             VkFence framesinflight[RENDERER_MAXLATENCY];
             uint32_t frame = 0; // 0-VULKAN_MAXLATENCY
+            
+            VkFence imfence; // Immediate submission fence
+            VkCommandBuffer imcmd; // Immediate command buffer
 
             VulkanContext(struct ORenderer::init *init);
             ~VulkanContext(void);
@@ -361,6 +351,14 @@ namespace OVulkan {
             // Request a copy of the backbuffer (in a Vulkan setting, this'll be a framebuffer pointing to the current swapchain image)
             uint8_t requestbackbuffer(struct ORenderer::framebuffer *framebuffer);
             uint8_t requestbackbufferinfo(struct ORenderer::backbufferinfo *info);
+            uint8_t requestscratchbuffer(ORenderer::ScratchBuffer **scratchbuffer) {
+                *scratchbuffer = &this->scratchbuffers[this->frame];
+                return ORenderer::RESULT_SUCCESS;
+            }
+            uint8_t requestbackbuffertexture(struct ORenderer::texture *texture) {
+                *texture = this->swaptextures[this->frame];
+                return ORenderer::RESULT_SUCCESS;
+            }
             uint8_t transitionlayout(struct ORenderer::texture texture, size_t format, size_t state);
 
             uint8_t submitstream(ORenderer::Stream *stream);
@@ -381,14 +379,24 @@ namespace OVulkan {
 
             void adjustprojection(glm::mat4 *mtx) {
                 (*mtx)[1][1] *= -1; // Vulkan has an inverted Y
-            };
+            }
 
-            VkCommandBuffer beginonetimecmd(void);
-            void endonetimecmd(VkCommandBuffer cmd);
+            void adjustorthoprojection(float *top, float *bottom) {
+                // Swap around top and bottom as it works differently in Vulkan than OpenGL.
+                float tmp0 = *top;
+                float tmp1 = *bottom;
+                *top = tmp1;
+                *bottom = tmp0;
+            }
+
+            void flushrange(struct ORenderer::buffer buffer, size_t size);
+
+            VkCommandBuffer beginimmediate(void);
+            void endimmediate(void);
 
 
             void execute(GraphicsPipeline *pipeline);
-            uint8_t createbackbuffer(struct ORenderer::renderpass pass);
+            uint8_t createbackbuffer(struct ORenderer::renderpass pass, struct ORenderer::textureview *depth = NULL);
             void interpretstream(VkCommandBuffer cmd, ORenderer::Stream *stream);
             VkShaderModule createshadermodule(ORenderer::Shader shader);
             void createswapchainviews(void);

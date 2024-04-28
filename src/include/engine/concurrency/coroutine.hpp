@@ -10,7 +10,7 @@
 #include <string.h>
 
 #define COROUTINE_MINSTACKSIZE 32768 // 32KiB minimum stack size
-#define COROUTINE_DEFAULTSTACKSIZE 57344 // 64KiB stack size
+#define COROUTINE_DEFAULTSTACKSIZE (COROUTINE_MINSTACKSIZE * 2) // 64KiB stack size
 
 #define COROUTINE_MAGICNUMBER 0x7e3cb1a9
 

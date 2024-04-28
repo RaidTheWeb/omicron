@@ -49,7 +49,7 @@ namespace OVulkan {
         { VK_KHR_XLIB_SURFACE_EXTENSION_NAME, false, true, false },
 #endif
 #ifdef OMICRON_DEBUG
-        { VK_EXT_DEBUG_UTILS_EXTENSION_NAME, false, true, false }
+        { VK_EXT_DEBUG_UTILS_EXTENSION_NAME, false, true, false },
 #endif
     };
 
@@ -57,7 +57,8 @@ namespace OVulkan {
         // TODO: Consider bindless rendering architecture
         // { VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME, false, false, false },
         { VK_KHR_SWAPCHAIN_EXTENSION_NAME, false, false, false },
-        { VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME, false, false, false }
+        { VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME, false, false, false },
+        { VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME, false, false, false }
     };
 
     // XXX: Translation table should account for SRGB
@@ -356,87 +357,9 @@ namespace OVulkan {
         VK_VERTEX_INPUT_RATE_INSTANCE // RENDERER_RATEINSTANCE
     };
 
-    void ScratchBuffer::create(VulkanContext *ctx, size_t size, size_t count) {
-        const size_t entsize = utils_stridealignment(size, ctx->phyprops.limits.minUniformBufferOffsetAlignment);
-
-        // VkBufferCreateInfo buffercreate = { };
-        // buffercreate.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        // buffercreate.pNext = NULL;
-        // buffercreate.size = entsize * count;
-        // buffercreate.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        // buffercreate.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        //
-        // VmaAllocationCreateInfo allocinfo = { };
-        // allocinfo.usage = VMA_MEMORY_USAGE_AUTO;
-        // allocinfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-        // allocinfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-        //
-        // VmaAllocation alloc;
-        // VkResult res = vmaCreateBuffer(ctx->allocator, &buffercreate, &allocinfo, &this->buffer.buffer[0], &alloc, NULL);
-        // 
-        // if (res != VK_SUCCESS) { // if we fail to have unified memory, try again with ram instead
-        //     allocinfo.requiredFlags &= ~ VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-        //     res = vmaCreateBuffer(ctx->allocator, &buffercreate, &allocinfo, &this->buffer.buffer[0], &alloc, NULL);
-        // }
-        //
-        // ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan buffer for scratchbuffer.\n");
-        // VmaAllocationInfo info;
-        // vmaGetAllocationInfo(ctx->allocator, alloc, &info);
-        // this->buffer.memory[0] = info.deviceMemory;
-        // this->buffer.offset[0] = info.offset;
-        // this->buffer.allocation[0] = alloc;
-        struct ORenderer::bufferdesc desc = { };
-        desc.size = entsize * count;
-        desc.usage = ORenderer::BUFFER_UNIFORM;
-        // exists on the GPU itself but we allow the CPU to see that memory and pass data to it when flushing the ranges, we also need random access to the memory as we rarely are writing from start to finish in its entirety.
-        desc.memprops = ORenderer::MEMPROP_GPULOCAL | ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPURANDOMACCESS;
-        ASSERT(ctx->createbuffer(&desc, &this->buffer) == ORenderer::RESULT_SUCCESS, "Failed to create scratch buffer.\n");
-
-        this->size = entsize * count;
-        this->pos = 0;
-
-        struct ORenderer::buffermapdesc mapdesc = { };
-        mapdesc.buffer = this->buffer;
-        mapdesc.size = entsize * count;
-        mapdesc.offset = 0;
-        ASSERT(ctx->mapbuffer(&mapdesc, &this->map) == ORenderer::RESULT_SUCCESS, "Failed to map scratch buffer.\n");
-
-    }
-
-    void ScratchBuffer::destroy(void) {
-        // vmaUnmapMemory(((VulkanContext *)ORenderer::context)->allocator, this->buffer.allocation[0]);
-        // vmaDestroyBuffer(((VulkanContext *)ORenderer::context)->allocator, this->buffer.buffer[0], this->buffer.allocation[0]);
-    }
-
-    size_t ScratchBuffer::write(const void *data, size_t size) {
-        const VulkanContext *ctx = (VulkanContext *)ORenderer::context;
-
-        ASSERT(this->pos + size < this->size, "Not enough space for scratchbuffer write of %lu bytes.\n", size);
-        size_t off = this->pos;
-        
-        memcpy(&((uint8_t *)this->map.mapped[0])[this->pos], data, size);
-
-        this->pos += utils_stridealignment(size, ctx->phyprops.limits.minUniformBufferOffsetAlignment);
-
-        return off;
-    }
-
-    void ScratchBuffer::flush(void) {
-        VulkanContext *ctx = (VulkanContext *)ORenderer::context; 
-        const size_t size = glm::min((size_t)utils_stridealignment(this->pos, ctx->phyprops.limits.minUniformBufferOffsetAlignment), this->size);
-
-        VkMappedMemoryRange range = { };
-        range.size = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-        range.pNext = NULL;
-        range.memory = ctx->buffers[this->buffer.handle].vkresource.memory[0];
-        range.offset = 0;
-        range.size = size;
-        VkResult res = vkFlushMappedMemoryRanges(ctx->dev, 1, &range);
-        ASSERT(res == VK_SUCCESS, "Failed to flush Vulkan memory range.\n");
-    }
-
+    
     static void vulkan_genmips(VkImage image, uint32_t width, uint32_t height, VkImageAspectFlags aspectmask, uint32_t mips, VkPipelineStageFlags stages) {
-        VkCommandBuffer cmd = ((VulkanContext *)ORenderer::context)->beginonetimecmd();
+        VkCommandBuffer cmd = ((VulkanContext *)ORenderer::context)->beginimmediate();
 
         VkImageMemoryBarrier barrier = { };
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -503,44 +426,38 @@ namespace OVulkan {
         // barrier transition for last mip level
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, stages, 0, 0, NULL, 0, NULL, 1, &barrier);
 
-        ((VulkanContext *)ORenderer::context)->endonetimecmd(cmd);
+        ((VulkanContext *)ORenderer::context)->endimmediate();
     }
 
-    VkCommandBuffer VulkanContext::beginonetimecmd(void) {
-        VkCommandBufferAllocateInfo allocinfo = { };
-        allocinfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocinfo.pNext = NULL;
-        allocinfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocinfo.commandPool = this->cmdpool;
-        allocinfo.commandBufferCount = 1;
-
-        VkCommandBuffer cmd;
-        VkResult res = vkAllocateCommandBuffers(this->dev, &allocinfo, &cmd);
-        ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan command buffers %d.\n", res);
+    VkCommandBuffer VulkanContext::beginimmediate(void) {
+        // TODO: Consider another locking for this to prevent overwriting the immediate work of another thread.
+        VkResult res = vkResetFences(this->dev, 1, &this->imfence);
+        ASSERT(res == VK_SUCCESS, "Failed to reset fences %d.\n", res);
+        res = vkResetCommandBuffer(this->imcmd, 0);
+        ASSERT(res == VK_SUCCESS, "Failed to reset command buffer %d.\n", res);
 
         VkCommandBufferBeginInfo begininfo = { };
         begininfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         begininfo.pNext = NULL;
         begininfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        vkBeginCommandBuffer(cmd, &begininfo);
-
-        return cmd;
+        res = vkBeginCommandBuffer(this->imcmd, &begininfo);
+        ASSERT(res == VK_SUCCESS, "Failed to begin Vulkan command buffer for immediate submission.\n");
+        return this->imcmd; // Easier if we just drop the access directly so code can alias the immediate buffer.
     }
 
-    void VulkanContext::endonetimecmd(VkCommandBuffer cmd) {
-        vkEndCommandBuffer(cmd);
+    void VulkanContext::endimmediate(void) {
+        vkEndCommandBuffer(this->imcmd);
 
         VkSubmitInfo submitinfo = { };
         submitinfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitinfo.pNext = NULL;
         submitinfo.commandBufferCount = 1;
-        submitinfo.pCommandBuffers = &cmd;
+        submitinfo.pCommandBuffers = &this->imcmd;
 
-        vkQueueSubmit(this->graphicsqueue, 1, &submitinfo, VK_NULL_HANDLE);
-        vkQueueWaitIdle(this->graphicsqueue);
-
-        vkFreeCommandBuffers(this->dev, this->cmdpool, 1, &cmd);
+        vkQueueSubmit(this->graphicsqueue, 1, &submitinfo, this->imfence);
+        // vkQueueWaitIdle(this->graphicsqueue); // Force the CPU to wait on the GPU being done with our work.
+        vkWaitForFences(this->dev, 1, &this->imfence, VK_TRUE, UINT64_MAX); // Wait for the completion of this buffer before handing the control back to the CPU.
     }
 
     static void transitionlayout(VkCommandBuffer cmd, struct texture *texture, size_t format, size_t state) {
@@ -659,19 +576,19 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::transitionlayout(struct ORenderer::texture texture, size_t format, size_t state) {
-        VkCommandBuffer cmd = this->beginonetimecmd();
+        VkCommandBuffer cmd = this->beginimmediate();
 
         resourcemutex.lock();
         struct texture *vktexture = &textures[texture.handle].vkresource;
         OVulkan::transitionlayout(cmd, vktexture, format, state);
         resourcemutex.unlock();
 
-        this->endonetimecmd(cmd);
+        this->endimmediate();
         return ORenderer::RESULT_SUCCESS;
     }
 
     static void vulkan_copybuffertoimage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
-        VkCommandBuffer cmd = ((VulkanContext *)ORenderer::context)->beginonetimecmd();
+        VkCommandBuffer cmd = ((VulkanContext *)ORenderer::context)->beginimmediate();
 
         VkBufferImageCopy region = { 0 };
         region.bufferOffset = 0;
@@ -688,7 +605,7 @@ namespace OVulkan {
 
         vkCmdCopyBufferToImage(cmd, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-        ((VulkanContext *)ORenderer::context)->endonetimecmd(cmd);
+        ((VulkanContext *)ORenderer::context)->endimmediate();
     }
 
     uint8_t VulkanContext::createtexture(struct ORenderer::texturedesc *desc, struct ORenderer::texture *texture) {
@@ -869,12 +786,16 @@ namespace OVulkan {
     uint8_t VulkanContext::createrenderpass(struct ORenderer::renderpassdesc *desc, struct ORenderer::renderpass *pass) {
 
         if (desc->attachmentcount <= 0) {
+            printf("too few attachments");
             return ORenderer::RESULT_INVALIDARG;
         } else if (desc->colourrefcount <= 0 && desc->depthref == NULL) { // no colour references and no depth references!!!!!
+            printf("too few refs\n");
             return ORenderer::RESULT_INVALIDARG;
         } else if (desc->attachments == NULL) {
+            printf("no attachments.\n");
             return ORenderer::RESULT_INVALIDARG;
         } else if (desc->colourrefs == NULL && desc->colourrefcount > 0) {
+            printf("no refs but told there is.\n");
             return ORenderer::RESULT_INVALIDARG;
         }
 
@@ -906,6 +827,7 @@ namespace OVulkan {
         VkAttachmentReference depthref = { };
         if (desc->depthref != NULL) {
             if (!ORenderer::isdepthformat(desc->attachments[desc->depthref->attachment].format)) {
+                printf("invalid format %lu.\n", desc->attachments[desc->depthref->attachment].format);
                 free(attachments);
                 free(colourrefs);
                 return ORenderer::RESULT_INVALIDARG;
@@ -1467,7 +1389,7 @@ namespace OVulkan {
             return ORenderer::RESULT_INVALIDARG;
         }
 
-        VkCommandBuffer cmd = this->beginonetimecmd();
+        VkCommandBuffer cmd = this->beginimmediate();
 
         VkBufferCopy copy = { };
         copy.srcOffset = desc->srcoffset;
@@ -1475,10 +1397,14 @@ namespace OVulkan {
         copy.size = desc->size;
 
         this->resourcemutex.lock();
-        vkCmdCopyBuffer(cmd, this->buffers[desc->src.handle].vkresource.buffer[0], this->buffers[desc->dst.handle].vkresource.buffer[0], 1, &copy);
+        vkCmdCopyBuffer(cmd,
+            this->buffers[desc->src.handle].vkresource.buffer[
+            this->buffers[desc->src.handle].vkresource.flags & ORenderer::BUFFERFLAG_PERFRAME ? this->frame : 0],
+            this->buffers[desc->dst.handle].vkresource.buffer[
+            this->buffers[desc->dst.handle].vkresource.flags & ORenderer::BUFFERFLAG_PERFRAME ? this->frame : 0], 1, &copy);
         this->resourcemutex.unlock();
 
-        this->endonetimecmd(cmd);
+        this->endimmediate();
         return ORenderer::RESULT_SUCCESS;
     }
 
@@ -1677,6 +1603,19 @@ namespace OVulkan {
 #endif
     }
 
+    void VulkanContext::flushrange(struct ORenderer::buffer buffer, size_t size) {
+        this->resourcemutex.lock();
+        VkMappedMemoryRange range = { };
+        range.size = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+        range.pNext = NULL;
+        range.memory = this->buffers[buffer.handle].vkresource.memory[0];
+        range.offset = 0;
+        range.size = size;
+        VkResult res = vkFlushMappedMemoryRanges(this->dev, 1, &range);
+        ASSERT(res == VK_SUCCESS, "Failed to flush Vulkan memory range.\n");
+        this->resourcemutex.unlock();
+    }
+
     uint8_t VulkanContext::requestbackbuffer(struct ORenderer::framebuffer *framebuffer) {
         if (framebuffer == NULL) {
             return ORenderer::RESULT_INVALIDARG;
@@ -1698,12 +1637,31 @@ namespace OVulkan {
     }
 
     void VulkanContext::interpretstream(VkCommandBuffer cmd, ORenderer::Stream *stream) {
+        ZoneScopedN("Interpret Stream");
         stream->claim();
-        // stream->mutex.lock();
         this->resourcemutex.lock();
+        TracyMessageL("begin interpret");
         for (auto it = stream->cmd.begin(); it != stream->cmd.end(); it++) {
             switch (it->type) {
+                case ORenderer::Stream::OP_DEBUGZONEBEGIN: {
+                    // printf("OP_DEBUGZONEBEGIN\n");
+#ifdef OMICRON_DEBUG
+                    void *mem = stream->tempmem.alloc(sizeof(tracy::VkCtxScope));
+                    it->zonebegin.zone = new (mem) tracy::VkCtxScope(this->tracyctx, TracyLine, TracyFile, strlen(TracyFile), TracyFunction, strlen(TracyFunction), it->zonebegin.name, strlen(it->zonebegin.name), cmd, true);
+#endif
+                    break;
+                }
+                case ORenderer::Stream::OP_DEBUGZONEEND: {
+#ifdef OMICRON_DEBUG
+                    // printf("OP_DEBUGZONEEND\n");
+                    tracy::VkCtxScope *zone = (tracy::VkCtxScope *)stream->cmd[it->zoneend].zonebegin.zone;
+                    zone->~VkCtxScope();
+#endif
+                    break;
+                }
                 case ORenderer::Stream::OP_BEGINRENDERPASS: {
+                    ZoneScopedN("OP_BEGINRENDERPASS");
+                    // printf("OP_BEGINRENDERPASS\n");
                     size_t marker = stream->tempmem.getmarker();
 
                     VkRenderPass rpass = this->renderpasses[it->renderpass.rpass.handle].vkresource.renderpass;
@@ -1727,15 +1685,23 @@ namespace OVulkan {
                         }
                     }
                     passbegin.pClearValues = clearvalues;
-                    vkCmdBeginRenderPass(cmd, &passbegin, VK_SUBPASS_CONTENTS_INLINE);
+                    {
+                        TracyVkZone(this->tracyctx, cmd, "Begin Renderpass");
+                        ZoneScopedN("Begin Renderpass (CPU)");
+                        vkCmdBeginRenderPass(cmd, &passbegin, VK_SUBPASS_CONTENTS_INLINE);
+                    }
                     stream->tempmem.freeto(marker);
                     break;
                 }
                 case ORenderer::Stream::OP_ENDRENDERPASS: {
+                    ZoneScopedN("OP_ENDRENDERPASS");
+                    // printf("OP_ENDRENDERPASS\n");
                     vkCmdEndRenderPass(cmd);
                     break;
                 }
                 case ORenderer::Stream::OP_SETVIEWPORT: {
+                    ZoneScopedN("OP_SETVIEWPORT");
+                    // printf("OP_SETVIEWPORT\n");
                     struct ORenderer::viewport viewport = it->viewport;
                     VkViewport vkviewport;
                     vkviewport.x = viewport.x;
@@ -1748,6 +1714,8 @@ namespace OVulkan {
                     break;
                 }
                 case ORenderer::Stream::OP_SETSCISSOR: {
+                    ZoneScopedN("OP_SETSCISSOR");
+                    // printf("OP_SETSCISSOR\n");
                     struct ORenderer::rect scissor = it->scissor;
                     VkRect2D vkscissor;
                     vkscissor.extent = (VkExtent2D) { .width = scissor.width, .height = scissor.height };
@@ -1756,6 +1724,8 @@ namespace OVulkan {
                     break;
                 }
                 case ORenderer::Stream::OP_SETPIPELINESTATE: {
+                    ZoneScopedN("OP_SETPIPELINESTATE");
+                    // printf("OP_SETPIPELINESTATE\n");
                     struct ORenderer::pipelinestate state = it->pipeline;
                     stream->pipelinestate = state;
                     struct pipelinestate *vkstate = &this->pipelinestates[state.handle].vkresource;
@@ -1764,14 +1734,20 @@ namespace OVulkan {
                     break;
                 }
                 case ORenderer::Stream::OP_DRAW: {
+                    ZoneScopedN("OP_DRAW");
+                    // printf("OP_DRAW\n");
                     vkCmdDraw(cmd, it->draw.vtxcount, it->draw.instancecount, it->draw.firstvtx, it->draw.firstinstance);
                     break;
                 }
                 case ORenderer::Stream::OP_DRAWINDEXED: {
+                    ZoneScopedN("OP_DRAWINDEXED");
+                    // printf("OP_DRAWINDEXED\n");
                     vkCmdDrawIndexed(cmd, it->drawindexed.idxcount, it->drawindexed.instancecount, it->drawindexed.firstidx, it->drawindexed.vtxoffset, it->drawindexed.firstinstance);
                     break;
                 }
                 case ORenderer::Stream::OP_SETVTXBUFFERS: {
+                    ZoneScopedN("OP_SETVTXBUFFERS");
+                    // printf("OP_SETVTXBUFFERS\n");
                     struct ORenderer::buffer *buffers = it->vtxbuffers.buffers;
 
                     size_t marker = stream->tempmem.getmarker();
@@ -1786,11 +1762,15 @@ namespace OVulkan {
                     break;
                 }
                 case ORenderer::Stream::OP_SETIDXBUFFER: {
+                    ZoneScopedN("OP_SETIDXBUFFER");
+                    // printf("OP_SETIDXBUFFER\n");
                     struct buffer *buffer = &this->buffers[it->idxbuffer.buffer.handle].vkresource;
                     vkCmdBindIndexBuffer(cmd, buffer->buffer[0], it->idxbuffer.offset, it->idxbuffer.index32 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
                     break;
                 }
                 case ORenderer::Stream::OP_BINDRESOURCE: {
+                    ZoneScopedN("OP_BINDRESOURCE");
+                    // printf("OP_BINDRESOURCE\n");
                     switch (it->resource.type) {
                         case ORenderer::RESOURCE_UNIFORM:
                         case ORenderer::RESOURCE_STORAGE:
@@ -1803,11 +1783,15 @@ namespace OVulkan {
                     break;
                 }
                 case ORenderer::Stream::OP_TRANSITIONLAYOUT: {
+                    ZoneScopedN("OP_TRANSITIONLAYOUT");
+                    // printf("OP_TRANSITIONLAYOUT\n");
                     struct texture *vktexture = &this->textures[it->layout.texture.handle].vkresource;
                     OVulkan::transitionlayout(cmd, vktexture, it->layout.format, it->layout.state);
                     break;
                 }
                 case ORenderer::Stream::OP_COMMITRESOURCES: {
+                    ZoneScopedN("OP_COMMITRESOURCES");
+                    // printf("OP_COMMITRESOURCES\n");
                     ASSERT(stream->pipelinestate.handle != RENDERER_INVALIDHANDLE, "Attempted to commit resources before deciding pipeline state.\n");
                     size_t marker = stream->tempmem.getmarker();
 
@@ -1843,7 +1827,10 @@ namespace OVulkan {
                     }
 
                     struct pipelinestate *pipelinestate = &this->pipelinestates[stream->pipelinestate.handle].vkresource;
-                    vkCmdPushDescriptorSetKHR(cmd, pipelinestate->type == ORenderer::GRAPHICSPIPELINE ? VK_PIPELINE_BIND_POINT_GRAPHICS : VK_PIPELINE_BIND_POINT_COMPUTE, pipelinestate->pipelinelayout, 0, stream->mappings.size(), wds);
+                    {
+                        ZoneScopedN("push descriptor\n");
+                        vkCmdPushDescriptorSetKHR(cmd, pipelinestate->type == ORenderer::GRAPHICSPIPELINE ? VK_PIPELINE_BIND_POINT_GRAPHICS : VK_PIPELINE_BIND_POINT_COMPUTE, pipelinestate->pipelinelayout, 0, stream->mappings.size(), wds);
+                    }
 
 
                     stream->mappings.clear();
@@ -1851,6 +1838,8 @@ namespace OVulkan {
                     break;
                 }
                 case ORenderer::Stream::OP_COPYBUFFERIMAGE: {
+                    ZoneScopedN("OP_COPYBUFFERIMAGE");
+                    // printf("OP_COPYBUFFERIMAGE\n");
                     struct ORenderer::bufferimagecopy region = it->copybufferimage.region;
                     struct buffer *buffer = &this->buffers[it->copybufferimage.buffer.handle].vkresource;
                     struct texture *texture = &this->textures[it->copybufferimage.texture.handle].vkresource;
@@ -1881,6 +1870,7 @@ namespace OVulkan {
         }
 
         this->resourcemutex.unlock();
+        TracyMessageL("end interpret");
         // stream->mutex.unlock();
         stream->release();
     }
@@ -1889,11 +1879,11 @@ namespace OVulkan {
         if (stream == NULL) {
             return ORenderer::RESULT_INVALIDARG;
         }
-        VkCommandBuffer cmd = this->beginonetimecmd();
+        VkCommandBuffer cmd = this->beginimmediate();
 
         this->interpretstream(cmd, stream);
 
-        this->endonetimecmd(cmd);
+        this->endimmediate();
         return ORenderer::RESULT_SUCCESS;
     }
 
@@ -1909,9 +1899,14 @@ namespace OVulkan {
 
         this->scratchbuffers[this->frame].reset();
 
-        // do stuff
-        this->interpretstream(cmd, stream);
+        {
+            TracyVkZoneS(this->tracyctx, cmd, "Record Command Buffer", 4);
+            // TracyVkZoneTransient(this->tracyctx, _ttz, cmd, data, true); // Use transient zones when names need to be dynamic
+            // do stuff
+            this->interpretstream(cmd, stream);
+        }
 
+        TracyVkCollect(tracyctx, cmd);
         res = vkEndCommandBuffer(cmd);
         ASSERT(res == VK_SUCCESS, "Failed to end Vulkan command buffer recording %d.\n", res);
     }
@@ -2016,7 +2011,7 @@ namespace OVulkan {
         }
     }
 
-    uint8_t VulkanContext::createbackbuffer(struct ORenderer::renderpass pass) {
+    uint8_t VulkanContext::createbackbuffer(struct ORenderer::renderpass pass, struct ORenderer::textureview *depth) {
         if (pass.handle == RENDERER_INVALIDHANDLE) {
             return ORenderer::RESULT_INVALIDARG;
         }
@@ -2028,9 +2023,10 @@ namespace OVulkan {
             fbdesc.width = this->surfacecaps.currentExtent.width;
             fbdesc.height = this->surfacecaps.currentExtent.height;
             fbdesc.layers = 1;
-            fbdesc.attachmentcount = 1;
+            fbdesc.attachmentcount = depth != NULL ? 2 : 1;
             fbdesc.pass = pass; // XXX: How do we setup the renderpass for the backbuffer?
-            fbdesc.attachments = &this->swaptextureviews[i];
+            struct ORenderer::textureview attachments[] = { this->swaptextureviews[i], *depth };
+            fbdesc.attachments = attachments;
             ASSERT(this->createframebuffer(&fbdesc, &this->swapfbs[i]) == ORenderer::RESULT_SUCCESS, "Failed to create Vulkan swapchain framebuffer.\n");
             char buf[64];
             sprintf(buf, "Backbuffer %lu", i);
@@ -2084,10 +2080,6 @@ namespace OVulkan {
             }
         }
 
-        for (size_t i = 0; i < RENDERER_MAXLATENCY; i++) {
-            this->scratchbuffers[i].destroy();
-        }
-
         for (auto it = this->framebuffers.begin(); it != this->framebuffers.end(); it++) {
             struct framebuffer vkframebuffer = it->second.vkresource;
             vkDestroyFramebuffer(this->dev, vkframebuffer.framebuffer, NULL);
@@ -2115,8 +2107,13 @@ namespace OVulkan {
             vkDestroySemaphore(this->dev, this->renderdone[i], NULL);
             vkDestroyFence(this->dev, this->framesinflight[i], NULL);
         }
+        vkDestroyFence(this->dev, this->imfence, NULL);
 
         vmaDestroyAllocator(this->allocator);
+
+        // for (size_t i = 0; i < RENDERER_MAXLATENCY; i++) {
+        TracyVkDestroy(this->tracyctx);
+        // }
 
         vkDestroyDevice(this->dev, NULL);
         vkDestroySurfaceKHR(this->instance, this->surface, NULL);
@@ -2221,10 +2218,16 @@ namespace OVulkan {
 
         OUtils::print("Using Vulkan compatible device %s (Vulkan API: %d.%d.%d)\n", this->phyprops.deviceName, VK_API_VERSION_MAJOR(this->phyprops.apiVersion), VK_API_VERSION_MINOR(this->phyprops.apiVersion), VK_API_VERSION_PATCH(this->phyprops.apiVersion));
 
-        vkGetPhysicalDeviceFeatures(this->phy, &this->phyfeatures);
-        // memset(&this->enabledphyfeatures, 0, sizeof(VkPhysicalDeviceProperties));
-        this->enabledphyfeatures = this->phyfeatures;
-        // this->phyfeatures.samplerAnisotropy = VK_TRUE;
+        vkGetPhysicalDeviceFeatures(this->phy, &this->phyfeatures); // Get all to enable all
+        VkPhysicalDeviceShaderDrawParametersFeatures shaderdraw = { };
+        shaderdraw.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETER_FEATURES;
+
+        VkPhysicalDeviceFeatures2 extrafeatures = { };
+        extrafeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        extrafeatures.pNext = &shaderdraw;
+
+        vkGetPhysicalDeviceFeatures2(this->phy, &extrafeatures);
+        ASSERT(shaderdraw.shaderDrawParameters == VK_TRUE, "Vulkan physical device does not have the required shader draw parameter feature.\n");
 
         checkextensions(this->phy, devextensions, sizeof(devextensions) / sizeof(devextensions[0]));
 
@@ -2311,6 +2314,7 @@ namespace OVulkan {
 
         VkDeviceCreateInfo devicecreate = { };
         devicecreate.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        devicecreate.pNext = &shaderdraw; // Pass on extra enabled features.
         devicecreate.pQueueCreateInfos = queuecreate;
         devicecreate.queueCreateInfoCount = 2;
         devicecreate.pEnabledFeatures = &this->phyfeatures;
@@ -2385,9 +2389,17 @@ namespace OVulkan {
         cmdalloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         cmdalloc.commandPool = this->cmdpool;
         cmdalloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        cmdalloc.commandBufferCount = RENDERER_MAXLATENCY;
+        cmdalloc.commandBufferCount = RENDERER_MAXLATENCY + 1;
         res = vkAllocateCommandBuffers(this->dev, &cmdalloc, this->cmd);
         ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan command buffer %d.\n", res);
+
+        VkCommandBufferAllocateInfo imalloc = { };
+        imalloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        imalloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        imalloc.commandBufferCount = 1;
+        imalloc.commandPool = this->cmdpool;
+        res = vkAllocateCommandBuffers(this->dev, &imalloc, &this->imcmd);
+        ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan immediate submission command buffer %d.\n", res);
 
         VkSemaphoreCreateInfo semcreate = { };
         semcreate.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -2399,6 +2411,7 @@ namespace OVulkan {
             ASSERT(vkCreateSemaphore(this->dev, &semcreate, NULL, &this->imagepresent[i]) == VK_SUCCESS && vkCreateSemaphore(this->dev, &semcreate, NULL, &this->renderdone[i]) == VK_SUCCESS, "Failed to create Vulkan semaphores!\n");
             ASSERT(vkCreateFence(this->dev, &fencecreate, NULL, &this->framesinflight[i]) == VK_SUCCESS, "Failed to create Vulkan fence!\n");
         }
+        ASSERT(vkCreateFence(this->dev, &fencecreate, NULL, &this->imfence) == VK_SUCCESS, "Failed to create Vulkan fence!\n");
 
         VkDescriptorPoolSize poolsizes[] = {
             (VkDescriptorPoolSize) {
@@ -2429,8 +2442,15 @@ namespace OVulkan {
         ASSERT(res == VK_SUCCESS, "Failed to create Vulkan descriptor pool %d.\n", res);
 
         for (size_t i = 0; i < RENDERER_MAXLATENCY; i++) {
-            this->scratchbuffers[i].create(this, 128, RENDERER_MAXDRAWCALLS);
+            this->scratchbuffers[i].create(this, 128, RENDERER_MAXDRAWCALLS, this->phyprops.limits.minUniformBufferOffsetAlignment);
         }
+
+#ifdef OMICRON_DEBUG
+        this->tracyctx = TracyVkContextCalibrated(this->instance, this->phy, this->dev, this->graphicsqueue, this->cmd[RENDERER_MAXLATENCY], vkGetInstanceProcAddr, vkGetDeviceProcAddr);
+#endif
+        // for (size_t i = 0; i < RENDERER_MAXLATENCY; i++) {
+            // this->cmdctx[i] = TracyVkContextCalibrated(this->instance, this->phy, this->dev, this->graphicsqueue, this->cmd[i], vkGetInstanceProcAddr, vkGetDeviceProcAddr);
+        // }
     }
 
     ORenderer::Stream stream[RENDERER_MAXLATENCY];
@@ -2492,12 +2512,10 @@ namespace OVulkan {
         presentinfo.pSwapchains = swapchains; // present to these swapchains
         presentinfo.pImageIndices = &image; // with this image
         presentinfo.pResults = NULL; // we don't want to check every swapchain suceeded
-        VkCommandBuffer cmd = this->beginonetimecmd();
-        // vulkan_resourcemutex.lock();
-        // vulkan_transitionlayout(cmd, &vulkan_textures[this->swaptextures[image].handle].vkresource, RENDERER_FORMATBGRA8, RENDERER_LAYOUTBACKBUFFER);
-        // vulkan_resourcemutex.unlock();
-        this->endonetimecmd(cmd);
-        res = vkQueuePresentKHR(this->presentqueue, &presentinfo); // blit queue to swapchains
+        {
+            ZoneScopedN("Vulkan Queue Present");
+            res = vkQueuePresentKHR(this->presentqueue, &presentinfo); // blit queue to swapchains
+        }
         if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
             // vulkan_recreateswap();
             vkDeviceWaitIdle(this->dev); // wait until all work is done!

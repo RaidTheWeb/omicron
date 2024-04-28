@@ -12,4 +12,11 @@
 	url = https://github.com/assimp/assimp
 [submodule "libs/tracy"]
 	path = libs/tracy
-	url = https://github.com/wolfpld/tracy
+    url = https://github.com/wolfpld/tracy
+    branch = v0.10
+[submodule "libs/im3d"]
+	path = libs/im3d
+	url = https://github.com/john-chapman/im3d
+[submodule "libs/imgui"]
+	path = libs/imgui
+	url = https://github.com/ocornut/imgui

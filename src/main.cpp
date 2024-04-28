@@ -27,12 +27,28 @@
 #include <engine/utils/pointers.hpp>
 
 #include <engine/resources/model.hpp>
-
+#include <engine/resources/asyncio.hpp>
 #include <engine/resources/serialise.hpp>
 
 #include <engine/utils/reflection.hpp>
 
+#include <tracy/Tracy.hpp>
+
 extern OScene::Scene scene;
+
+void testjob(OJob::Job *job) {
+    uint64_t *args = (uint64_t *)job->param;
+    ((OScene::Scene *)args[0])->partitionmanager.cull(*((ORenderer::PerspectiveCamera *)args[1]));
+}
+
+void callback(struct OResource::AsyncIO::work *work) {
+    printf("work size %lu\n", work->size);
+    for (size_t i = 0; i < work->size; i++) {
+        printf("%c", ((char *)work->buffer)[i]);
+    }
+    free(work->buffer);
+    free(work);
+}
 
 int main(int argc, const char **argv) {
     engine_engine = (struct engine *)malloc(sizeof(struct engine));
@@ -41,6 +57,8 @@ int main(int argc, const char **argv) {
     int32_t w, h;
     glfwGetWindowSize(engine_engine->window, &w, &h);
     engine_engine->winsize = glm::vec2(w, h);
+
+    OJob::init();
 
     // renderer_context = renderer_createcontext();
 
@@ -56,7 +74,7 @@ int main(int argc, const char **argv) {
     ORenderer::context = new OVulkan::VulkanContext(&init);
 
     struct ORenderer::renderer *renderer = ORenderer::initrenderer();
-    camera_init(renderer);
+    // camera_init(renderer);
 
     OResource::RPak rpak = OResource::RPak("test.rpak");
     OResource::manager.loadrpak(&rpak);
@@ -65,27 +83,31 @@ int main(int argc, const char **argv) {
 
     // OResource::manager.create("misc/model.glb");
 
-    // OResource::manager.create("misc/out.ktx2"); 
+    // OResource::manager.create("misc/out.ktx2");
 
     PBRPipeline pipeline = PBRPipeline();
     pipeline.init();
 
     // OResource::Model::fromassimp("misc/Scene.glb", "misc/testscene.omod");
 
+    // XXX:
     OScene::Scene scene2 = OScene::Scene();
-    OScene::GameObject *obj = OScene::GameObject::create<OScene::GameObject>();
-    obj->scene = &scene2;
-    obj->translate(glm::vec3(0.0f, 0.0f, 0.0f));
-    scene2.objects.push_back(obj->gethandle());
+    // OScene::GameObject *obj = OScene::GameObject::create<OScene::GameObject>();
+    // obj->scene = &scene2;
+    // obj->translate(glm::vec3(0.0f, 0.0f, 0.0f));
+    // scene2.objects.push_back(obj->gethandle());
+    //
+    // OScene::GameObject *model = OScene::GameObject::create<OScene::ModelInstance>();
+    // model->scene = &scene2;
+    // model->parent = obj->gethandle();
+    // obj->children.push_back(model->gethandle());
+    // ((OScene::ModelInstance *)model)->model = ORenderer::Model("misc/testscene.omod");
+    // ((OScene::ModelInstance *)model)->modelpath = "misc/testscene.omod";
+    // model->translate(glm::vec3(2.0f, 1.0f, 0.0f));
+    // scene2.objects.push_back(model->gethandle());
 
-    OScene::GameObject *model = OScene::GameObject::create<OScene::ModelInstance>();
-    model->scene = &scene2;
-    model->parent = obj->gethandle();
-    obj->children.push_back(model->gethandle());
-    ((OScene::ModelInstance *)model)->model = ORenderer::Model("misc/testscene.omod");
-    ((OScene::ModelInstance *)model)->modelpath = "misc/testscene.omod";
-    model->translate(glm::vec3(2.0f, 1.0f, 0.0f));
-    scene2.objects.push_back(model->gethandle());
+
+
     // ((OScene::ModelInstance *)model)->model.meshes[0].material.base.texture = OResource::Texture::load("misc/out.ktx2");
     // struct ORenderer::textureviewdesc viewdesc = { };
     // viewdesc.texture = ((OScene::ModelInstance *)model)->model.meshes[0].material.base.texture;
@@ -99,15 +121,17 @@ int main(int argc, const char **argv) {
     // ORenderer::context->createtextureview(&viewdesc, &((OScene::ModelInstance *)model)->model.meshes[0].material.base.view);
     // scene.objects.push_back(model);
 
-    model = OScene::GameObject::create<OScene::ModelInstance>();
-    model->scene = &scene2;
-    model->parent = obj->gethandle();
-    obj->children.push_back(model->gethandle());
-    // model->transform.parent = obj->gethandle();
-    ((OScene::ModelInstance *)model)->model = ORenderer::Model("misc/testscene.omod");
-    ((OScene::ModelInstance *)model)->modelpath = "misc/testscene.omod";
-    model->translate(glm::vec3(2.0f, 1.0f, 1.0f));
-    scene2.objects.push_back(model->gethandle());
+    // XXX:
+    // model = OScene::GameObject::create<OScene::ModelInstance>();
+    // model->scene = &scene2;
+    // model->parent = obj->gethandle();
+    // obj->children.push_back(model->gethandle());
+    // ((OScene::ModelInstance *)model)->model = ORenderer::Model("misc/testscene.omod");
+    // ((OScene::ModelInstance *)model)->modelpath = "misc/testscene.omod";
+    // model->translate(glm::vec3(2.0f, 1.0f, 1.0f));
+    // scene2.objects.push_back(model->gethandle());
+
+
     // ((OScene::ModelInstance *)model)->model.meshes[0].material.base.texture = OResource::Texture::load("misc/out2.ktx2");
     // viewdesc.texture = ((OScene::ModelInstance *)model)->model.meshes[0].material.base.texture;
     // viewdesc.type = ORenderer::IMAGETYPE_2D;
@@ -122,22 +146,93 @@ int main(int argc, const char **argv) {
 
     OScene::setupreflection();
 
+    // scene2.save("saved.osce");
+    // scene.load("saved.osce");
+
+
+    srand(time(NULL));
+
+    OScene::Test *test = OScene::GameObject::create<OScene::Test>();
+    test->scene = &scene;
+    // test->flags |= OScene::GameObject::IS_INVISIBLE;
+    test->model->model = new ORenderer::Model("misc/testscene.omod");
+    test->model->modelpath = "misc/testscene.omod";
+    test->bounds = OMath::AABB(test->model->model->bounds.min, test->model->model->bounds.max);
+    // test->translate(glm::vec3(1.0f, 3.0f, 2.0f));
+    // test->setrotation(glm::vec3(glm::radians((float)(rand() % 40)), 0.0f, glm::radians((float)(rand() % 40))));
+    // test->silly();
+    // scene.objects.push_back(test->gethandle());
+
+    OScene::Test *m = OScene::GameObject::create<OScene::Test>();
+    m->scene = &scene;
+    // test->flags |= OScene::GameObject::IS_INVISIBLE;
+    m->model->model = new ORenderer::Model("misc/testscene.omod");
+    m->model->modelpath = "misc/testscene.omod";
+    m->bounds = OMath::AABB(test->model->model->bounds.min, test->model->model->bounds.max);
+    m->translate(glm::vec3(1.0f, 3.0f, 2.0f));
+    m->setrotation(glm::vec3(glm::radians((float)(rand() % 40)), 0.0f, glm::radians((float)(rand() % 40))));
+    m->silly();
+    scene.objects.push_back(m->gethandle());
+
     scene2.save("saved.osce");
     scene.load("saved.osce");
+
+    {
+        ZoneScopedN("Object Creation");
+        for (size_t i = 0; i < 2048; i++) {
+            OScene::Test *e = OScene::GameObject::create<OScene::Test>();
+            e->scene = &scene;
+            // e->flags |= OScene::GameObject::IS_INVISIBLE;
+            e->model->model = test->model->model;
+            e->model->modelpath = "misc/testscene.omod";
+            e->bounds = OMath::AABB(e->model->model->bounds.min, e->model->model->bounds.max);
+            e->translate(glm::vec3(rand() % 400, rand() % 5, rand() % 400));
+            e->setrotation(glm::vec3(glm::radians((float)(rand() % 40)), 0.0f, glm::radians((float)(rand() % 40))));
+            e->silly();
+            scene.objects.push_back(e->gethandle());
+        }
+    }
+
+    // Quick hack to get an orientation quaternion that does this
+    glm::mat4 viewmtx = glm::lookAt(glm::vec3(2.0f, 2.0f, 5.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+    glm::vec3 _0; // Scale
+    glm::quat orientation;
+    glm::vec3 _1; // Position
+    glm::vec3 _2; // Skew
+    glm::vec4 _3; // Perspective
+
+    glm::decompose(viewmtx, _0, orientation, _1, _2, _3);
+
+
+    ORenderer::PerspectiveCamera camera = ORenderer::PerspectiveCamera(glm::vec3(2.0f, 2.0f, 5.0f), orientation, 45.0f, 1280 / 720, 0.1f, 10.0f);
+    glm::ivec3 loc = camera.pos * (1 / 300.0f);
+    printf("would be in cell %d %d %d\n", loc.x, loc.y, loc.z);
+
+    OResource::manager.create("openworldnotes");
+
+    OResource::AsyncIO::loadcall("openworldnotes", 0, SIZE_MAX, callback);
+    // void *buffer = NULL;
+    // OResource::AsyncIO::loadwait("openworldnotes", &buffer, 0, SIZE_MAX, NULL);
+    // printf("%s\n", buffer);
+
+    // OScene::CullResult *res = scene2.partitionmanager.cull(camera);
+
+
+    // OScene::GameObject::destroy(test->gethandle());
 
     // OResource::manager.create("misc/test.omod");
     // OResource::Model m = OResource::Model("misc/testscene.omod");
 
-
     // OUtils::HandlePointer<OResource::Resource> res = manager.create(OResource::Resource::TYPE_UNKNOWN, "misc/test.res");
 
     // manager.destroy(res);
-    
+
     // OResource::RPak rpak = OResource::RPak("test.rpak");
     // for (size_t i = 0; i < rpak.header.num; i++) {
         // printf("%s\n", rpak.entries[i].path);
     // }
-    
+
 
     // struct script *script = script_load("./pipelineproto.so", "testscript");
     // engine_engine->activecam = renderer->camera;
@@ -166,9 +261,12 @@ int main(int argc, const char **argv) {
 
         // vulkan_frame(&pipeline);
         ((OVulkan::VulkanContext *)ORenderer::context)->execute(&pipeline);
+        FrameMark;
+        // break;
         // return 0;
     }
 
+    OJob::destroy();
     delete ORenderer::context;
 
     return 0;

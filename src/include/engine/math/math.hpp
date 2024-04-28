@@ -17,17 +17,9 @@
 
 namespace OMath {
 
-    class Sphere {
-        public:
-            Sphere(void) { }
-            Sphere(glm::vec3 pos, float radius) {
-                this->pos = pos;
-                this->radius = radius;
-            }
-
-            glm::vec3 pos;
-            float radius;
-    };
+    inline constexpr glm::vec3 worldup = glm::vec3(0.0f, 1.0f, 0.0f);
+    inline constexpr glm::vec3 worldright = glm::vec3(1.0f, 0.0f, 0.0f);
+    inline constexpr glm::vec3 worldfront = glm::vec3(0.0f, 0.0f, 1.0f);
 }
 
 #endif

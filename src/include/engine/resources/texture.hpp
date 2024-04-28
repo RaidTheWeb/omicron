@@ -150,6 +150,7 @@ namespace OResource {
                         desc.width = ktxtexture->baseWidth;
                         desc.height = ktxtexture->baseHeight;
                         desc.depth = ktxtexture->baseDepth;
+                        printf("mips: %u\n", ktxtexture->numLevels);
                         desc.mips = ktxtexture->numLevels;
                         desc.layers = ktxtexture->isCubemap ? 6 : ktxtexture->numLayers;
                         desc.samples = ORenderer::SAMPLE_X1;

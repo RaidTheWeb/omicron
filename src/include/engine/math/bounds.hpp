@@ -3,6 +3,7 @@
 
 #include <engine/math/math.hpp>
 #include <engine/matrix.hpp>
+#include <tracy/Tracy.hpp>
 #include <stdio.h>
 #include <string.h>
 
@@ -14,11 +15,15 @@ namespace OMath {
         public:
             glm::vec3 min = glm::vec3(0.0f);
             glm::vec3 max = glm::vec3(0.0f);
-           
+            glm::vec3 centre = glm::vec3(0.0f);
+            glm::vec3 extent = glm::vec3(0.0f);
+
             AABB(void) { }
             AABB(glm::vec3 min, glm::vec3 max) {
                 this->min = min;
                 this->max = max;
+                this->centre = (this->max + this->min) * 0.5f;
+                this->extent = this->max - this->min;
             }
 
             glm::vec3 mincoords(glm::vec3 a, glm::vec3 b) {
@@ -63,6 +68,45 @@ namespace OMath {
                 return true;
             }
 
+            // Get the centre point of the AABB.
+            glm::vec3 getcentre(void) {
+                return (this->max + this->min) * 0.5f;
+            }
+
+            glm::vec3 calcextent(void) {
+                return this->max - this->min;
+            }
+
+            // Get the radius of the AABB.
+            float radius(void) {
+                return glm::length(this->calcextent() * 0.5f);
+            }
+
+            void transform(glm::mat4 mtx) {
+                const glm::vec4 xa = mtx[0] * this->min.x;
+                const glm::vec4 xb = mtx[0] * this->max.x;
+                const glm::vec4 ya = mtx[1] * this->min.y;
+                const glm::vec4 yb = mtx[1] * this->max.y;
+                const glm::vec4 za = mtx[2] * this->min.z;
+                const glm::vec4 zb = mtx[2] * this->max.z;
+
+                // Transform min and max
+                this->min = glm::min(xa, xb) + glm::min(ya, yb) + glm::min(za, zb) + mtx[3];
+                this->max = glm::max(xa, xb) + glm::max(ya, yb) + glm::max(za, zb) + mtx[3];
+            }
+
+            AABB transformed(glm::mat4 mtx) {
+                const glm::vec4 xa = mtx[0] * this->min.x;
+                const glm::vec4 xb = mtx[0] * this->max.x;
+                const glm::vec4 ya = mtx[1] * this->min.y;
+                const glm::vec4 yb = mtx[1] * this->max.y;
+                const glm::vec4 za = mtx[2] * this->min.z;
+                const glm::vec4 zb = mtx[2] * this->max.z;
+
+                // Transform min and max
+                return AABB(glm::min(xa, xb) + glm::min(ya, yb) + glm::min(za, zb) + mtx[3], max = glm::max(xa, xb) + glm::max(ya, yb) + glm::max(za, zb) + mtx[3]);
+            }
+
             constexpr bool operator ==(AABB &rhs) {
                 return this->min == rhs.min && this->max == rhs.max;
             }
@@ -82,244 +126,203 @@ namespace OMath {
                 this->max += v;
             }
     };
-};
 
-// enum {
-//     FRUSTUM_PLANENEAR,
-//     FRUSTUM_PLANEFAR,
-//     FRUSTUM_PLANELEFT,
-//     FRUSTUM_PLANERIGHT,
-//     FRUSTUM_PLANETOP,
-//     FRUSTUM_PLANEBOTTOM,
-//     FRUSTUM_PLANEEXTRA0,
-//     FRUSTUM_PLANEEXTRA1,
-//     FRUSTUM_PLANECOUNT
-// };
-//
-// struct frustum {
-//     float xs[FRUSTUM_PLANECOUNT];
-//     float ys[FRUSTUM_PLANECOUNT];
-//     float zs[FRUSTUM_PLANECOUNT];
-//     float ds[FRUSTUM_PLANECOUNT];
-//     vec3s points[8];
-// };
-//
-// struct shiftedfrustum {
-//     float xs[FRUSTUM_PLANECOUNT];
-//     float ys[FRUSTUM_PLANECOUNT];
-//     float zs[FRUSTUM_PLANECOUNT];
-//     float ds[FRUSTUM_PLANECOUNT];
-//     vec3s points[8];
-//     vec3s origin;
-// } __attribute__((aligned(16)));
-//
-// static inline struct frustum frustum_init(void) {
-//     struct frustum frustum = { 0 };
-//     frustum.xs[6] = frustum.xs[7] = 1;
-//     frustum.ys[6] = frustum.ys[7] = 0;
-//     frustum.zs[6] = frustum.zs[7] = 0;
-//     frustum.ds[6] = frustum.ds[7] = 0;
-//     return frustum;
-// }
-//
-// static inline bool shiftedfrustum_intersectnearplane(struct shiftedfrustum *frustum, vec3s centre, float radius) {
-//     const float x = centre.x - frustum->origin.x;
-//     const float y = centre.y - frustum->origin.y;
-//     const float z = centre.z - frustum->origin.z;
-//     const uint32_t i = FRUSTUM_PLANENEAR;
-//     float distance = frustum->xs[i] * x + frustum->ys[i] * y + z * frustum->zs[i] + frustum->ds[i];
-//     distance = distance < 0 ? -distance : distance;
-//     return distance < radius;
-// }
-//
-// static inline bool frustum_intersectnearplane(struct frustum *frustum, vec3s centre, float radius) {
-//     const float x = centre.x;
-//     const float y = centre.y;
-//     const float z = centre.z;
-//     const uint32_t i = FRUSTUM_PLANENEAR;
-//     float distance = frustum->xs[i] * x + frustum->ys[i] * y + z * frustum->zs[i] + frustum->ds[i];
-//     distance = distance < 0 ? -distance : distance;
-//     return distance < radius;
-// }
-//
-// static inline bool frustum_intersectaabboff(struct frustum *frustum, struct aabb aabb, float offset) {
-//     vec3s box[] = { aabb.min, aabb.max };
-//
-//     for (size_t i = 0; i < 6; i++) {
-//         int px = frustum->xs[i] > 0.0f;
-//         int py = frustum->ys[i] > 0.0f;
-//         int pz = frustum->zs[i] > 0.0f;
-//
-//         float dp = (frustum->xs[i] * box[px].x) + (frustum->ys[i] * box[py].y) + (frustum->zs[i] * box[pz].z);
-//
-//         if (dp < -frustum->ds[i] - offset) {
-//             return false;
-//         }
-//     }
-//     return true;
-// }
-//
-// static inline bool frustum_intersectaabb(struct frustum *frustum, struct aabb aabb) {
-//     vec3s box[] = { aabb.min, aabb.max };
-//
-//     for (size_t i = 0; i < 6; i++) {
-//         int px = frustum->xs[i] > 0.0f;
-//         int py = frustum->ys[i] > 0.0f;
-//         int pz = frustum->zs[i] > 0.0f;
-//
-//         float dp = (frustum->xs[i] * box[px].x) + (frustum->ys[i] * box[py].y) + (frustum->zs[i] * box[pz].z);
-//
-//         if (dp < -frustum->ds[i]) {
-//             return false;
-//         }
-//     }
-//     return true;
-// }
-//
-// static inline bool shiftedfrustum_intersectaabb(struct shiftedfrustum *frustum, vec3s pos, vec3s size) {
-//     const vec3s relpos = glms_vec3_sub(pos, frustum->origin);
-//     vec3s box[] = { relpos, glms_vec3_add(relpos, size) };
-//
-//     for (size_t i = 0; i < 6; i++) {
-//         int px = frustum->xs[i] > 0.0f;
-//         int py = frustum->ys[i] > 0.0f;
-//         int pz = frustum->zs[i] > 0.0f;
-//
-//         float dp = (frustum->xs[i] * box[px].x) + (frustum->ys[i] * box[py].y) + (frustum->zs[i] * box[pz].z);
-//
-//         if (dp < -frustum->ds[i]) {
-//             return false;
-//         }
-//     }
-//     return true;
-// }
-//
-// static inline void frustum_transform(struct frustum *frustum, mat4s mtx) {
-//     for (size_t i = 0; i < 8; i++) {
-//         frustum->points[i] = mtx_transformpoint(mtx, frustum->points[i]);
-//     }
-//
-//     for (size_t i = 0; i < sizeof(frustum->xs) / sizeof(float); i++) {
-//         vec3s p;
-//         if (frustum->xs[i] != 0) {
-//             p = (vec3s) { -frustum->ds[i] / frustum->xs[i], 0.0f, 0.0f };
-//         } else if (frustum->ys[i] != 0) {
-//             p = (vec3s) { 0.0f, -frustum->ds[i] / frustum->ys[i], 0.0f };
-//         } else {
-//             p = (vec3s) { 0.0f, 0.0f, -frustum->ds[i] / frustum->zs[i] };
-//         }
-//
-//         vec3s n = { frustum->xs[i], frustum->ys[i], frustum->zs[i] };
-//         n = mtx_transformvector(mtx, n);
-//         p = mtx_transformpoint(mtx, p);
-//
-//         frustum->xs[i] = n.x;
-//         frustum->ys[i] = n.y;
-//         frustum->zs[i] = n.z;
-//         frustum->ds[i] = -glms_vec3_dot(p, n);
-//     }
-//
-// }
-//
-// struct sphere frustum_computeboundingsphere(struct frustum *frustum) {
-//     struct sphere sphere = { 0 };
-//     sphere.pos = frustum->points[0];
-//     for (size_t i = 1; i < sizeof(frustum->points) / sizeof(frustum->points[0]); i++) {
-//         sphere.pos = glms_vec3_add(sphere.pos, frustum->points[i]);
-//     }
-//     sphere.pos = glms_vec3_muladds((vec3s) { 1.0f, 1.0f, 1.0f }, 1.0f / (sizeof(frustum->points) / sizeof(frustum->points[0])), sphere.pos);
-//
-//     sphere.radius = 0;
-//     for (size_t i = 0; i < sizeof(frustum->points) / sizeof(frustum->points[0]); i++) {
-//         vec3s v = glms_vec3_sub(frustum->points[i], sphere.pos);
-//         float lensq = v.x * v.x + v.y * v.y + v.z * v.z;
-//         if (lensq > sphere.radius) {
-//             sphere.radius = lensq;
-//         }
-//     }
-//     sphere.radius = sqrtf(sphere.radius);
-//     return sphere;
-// }
-//
-// static inline bool frustum_issphereinside(struct frustum *frustum, vec3s centre, float radius) {
-//     vec4s px = *(vec4s *)(frustum->xs);
-//     vec4s py = *(vec4s *)(frustum->ys);
-//     vec4s pz = *(vec4s *)(frustum->zs);
-//     vec4s pd = *(vec4s *)(frustum->ds);
-//
-//     vec4s cx = (vec4s) { centre.x, centre.x, centre.x, centre.x };
-//     vec4s cy = (vec4s) { centre.y, centre.y, centre.y, centre.y };
-//     vec4s cz = (vec4s) { centre.z, centre.z, centre.z, centre.z };
-//
-//     vec4s t = glms_vec4_mul(cx, px);
-//     t = glms_vec4_add(t, glms_vec4_mul(cy, py));
-//     t = glms_vec4_add(t, glms_vec4_mul(cz, pz));
-//     t = glms_vec4_add(t, pd);
-//     t = glms_vec4_sub(t, (vec4s) { -radius, -radius, -radius, -radius });
-//
-//     if ((t.w < 0 ? (1 << 3) : 0) | (t.z < 0 ? (1 << 2) : 0) | (t.y < 0 ? (1 << 1) : 0) | (t.x < 0 ? 1 : 0)) {
-//         return false;
-//     }
-//
-//     px = *(vec4s *)&frustum->xs[4];
-//     py = *(vec4s *)&frustum->ys[4];
-//     pz = *(vec4s *)&frustum->zs[4];
-//     pd = *(vec4s *)&frustum->ds[4];
-//
-//     t = glms_vec4_mul(cx, px);
-//     t = glms_vec4_add(t, glms_vec4_mul(cy, py));
-//     t = glms_vec4_add(t, glms_vec4_mul(cz, pz));
-//     t = glms_vec4_add(t, pd);
-//     t = glms_vec4_sub(t, (vec4s) { -radius, -radius, -radius, -radius });
-//
-//     return ((t.w < 0 ? (1 << 3) : 0) | (t.z < 0 ? (1 << 2) : 0) | (t.y < 0 ? (1 << 1) : 0) | (t.x < 0 ? 1 : 0)) == 0;
-// }
-//
-// static inline void frustum_setplane(struct frustum *frustum, size_t plane, vec3s normal, vec3s point) {
-//     frustum->xs[plane] = normal.x;
-//     frustum->ys[plane] = normal.y;
-//     frustum->zs[plane] = normal.z;
-//     frustum->ds[plane] = -glms_vec3_dot(point, normal);
-// }
-//
-// static inline void shiftedfrustum_setplane(struct shiftedfrustum *frustum, size_t plane, vec3s normal, vec3s point) {
-//     frustum->xs[plane] = normal.x;
-//     frustum->ys[plane] = normal.y;
-//     frustum->zs[plane] = normal.z;
-//     frustum->ds[plane] = -glms_vec3_dot(point, normal);
-// }
-//
-// static inline vec3s shiftedfrustum_getnormal(struct shiftedfrustum *frustum, size_t plane) {
-//     return (vec3s) { frustum->xs[plane], frustum->ys[plane], frustum->zs[plane] };
-// }
-//
-// static inline struct frustum shiftedfrustum_getrelative(struct shiftedfrustum *frustum, vec3s pos) {
-//     struct frustum res = { 0 };
-//     const vec3s off = glms_vec3_sub(pos, frustum->origin);
-//     memcpy(res.points, frustum->points, sizeof(res.points));
-//
-//     const vec3s near = shiftedfrustum_getnormal(frustum, FRUSTUM_PLANENEAR);
-//     const vec3s far = shiftedfrustum_getnormal(frustum, FRUSTUM_PLANEFAR);
-//     const vec3s left = shiftedfrustum_getnormal(frustum, FRUSTUM_PLANELEFT);
-//     const vec3s right = shiftedfrustum_getnormal(frustum, FRUSTUM_PLANERIGHT);
-//     const vec3s top = shiftedfrustum_getnormal(frustum, FRUSTUM_PLANETOP);
-//     const vec3s bottom = shiftedfrustum_getnormal(frustum, FRUSTUM_PLANEBOTTOM);
-//
-//     frustum_setplane(&res, FRUSTUM_PLANEEXTRA0, near, glms_vec3_add(frustum->points[0], off));
-//     frustum_setplane(&res, FRUSTUM_PLANEEXTRA1, near, glms_vec3_add(frustum->points[0], off));
-//     frustum_setplane(&res, FRUSTUM_PLANENEAR, near, glms_vec3_add(frustum->points[0], off));
-//     frustum_setplane(&res, FRUSTUM_PLANEFAR, far, glms_vec3_add(frustum->points[4], off));
-//
-//     frustum_setplane(&res, FRUSTUM_PLANELEFT, left, glms_vec3_add(frustum->points[1], off));
-//     frustum_setplane(&res, FRUSTUM_PLANERIGHT, right, glms_vec3_add(frustum->points[0], off));
-//     frustum_setplane(&res, FRUSTUM_PLANETOP, top, glms_vec3_add(frustum->points[0], off));
-//     frustum_setplane(&res, FRUSTUM_PLANEBOTTOM, bottom, glms_vec3_add(frustum->points[2], off));
-//
-//     for (size_t i = 0; i < 8; i++) {
-//         res.points[i] = glms_vec3_add(res.points[i], off);
-//     }
-//
-//     return res;
-// }
+    class OBB {
+        public:
+            // glm::vec3 min = glm::vec3(0.0f);
+            // glm::vec3 max = glm::vec3(0.0f);
+            AABB bounds;
+            glm::quat orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            OBB(void) { }
+            OBB(AABB aabb, glm::quat orientation) {
+                this->bounds = aabb;
+                // this->min = aabb.min;
+                // this->max = aabb.max;
+                this->orientation = orientation;
+            }
+
+            // AABB toaabb(void) {
+                // return OMath::AABB(this->min, this->max);
+            // }
+    };
+
+    class Sphere {
+        public:
+            Sphere(void) { }
+            Sphere(glm::vec3 pos, float radius) {
+                this->pos = pos;
+                this->radius = radius;
+            }
+
+            glm::vec3 pos;
+            float radius;
+    };
+
+    class Plane {
+        public:
+            glm::vec3 normal = glm::vec3(0.0f);
+            float distance = 0.0f;
+
+            Plane(void) { }
+
+            Plane(const glm::vec3 &p1, const glm::vec3 &norm) {
+                this->normal = glm::normalize(norm);
+                this->distance = glm::dot(this->normal, p1);
+            }
+
+            Plane(const glm::vec3 &normal, float distance) {
+                this->normal = normal;
+                this->distance = distance;
+            }
+    };
+
+    class Frustum {
+        public:
+            enum planes {
+                NEAR,
+                FAR,
+                LEFT,
+                RIGHT,
+                TOP,
+                BOTTOM,
+                COUNT
+            };
+
+            enum intersection {
+                OUTSIDE,
+                INTERSECT,
+                INSIDE
+            };
+
+            Plane planes[COUNT];
+
+            Frustum(void) { }
+
+            void update(glm::mat4 &mtx) {
+                ZoneScopedN("Update Frustum");
+
+                // This big chunk of code extracts individual planes from the matrix. This matrix can be view, proj, or viewproj depending on what this frustum is used for.
+                this->planes[planes::LEFT] = Plane(
+                    glm::vec3(mtx[0][3] + mtx[0][0], mtx[1][3] + mtx[1][0], mtx[2][3] + mtx[2][0]),
+                    mtx[3][3] + mtx[3][0]
+                );
+                this->planes[planes::RIGHT] = Plane(
+                    glm::vec3(mtx[0][3] - mtx[0][0], mtx[1][3] - mtx[1][0],mtx[2][3] - mtx[2][0]),
+                    mtx[3][3] - mtx[3][0]
+                );
+                this->planes[planes::BOTTOM] = Plane(
+                    glm::vec3(mtx[0][3] + mtx[0][1], mtx[1][3] + mtx[1][1], mtx[2][3] + mtx[2][1]),
+                    mtx[3][3] + mtx[3][1]
+                );
+                this->planes[planes::TOP] = Plane(
+                    glm::vec3(mtx[0][3] - mtx[0][1], mtx[1][3] - mtx[1][1], mtx[2][3] - mtx[2][1]),
+                    mtx[3][3] - mtx[3][1]
+                );
+                this->planes[planes::NEAR] = Plane(
+                    glm::vec3(mtx[0][3] + mtx[0][2], mtx[1][3] + mtx[1][2], mtx[2][3] + mtx[2][2]),
+                    mtx[3][3] + mtx[3][2]
+                );
+                this->planes[planes::FAR] = Plane(
+                    glm::vec3(mtx[0][3] - mtx[0][2], mtx[1][3] - mtx[1][2], mtx[2][3] - mtx[2][2]),
+                    mtx[3][3] - mtx[3][2]
+                );
+
+                // Normalise all the planes.
+                for (size_t i = 0; i < planes::COUNT; i++) {
+                    const float magnitude = glm::length(this->planes[i].normal);
+                    this->planes[i].normal /= magnitude;
+                    this->planes[i].distance /= magnitude;
+                }
+            }
+
+            Frustum(glm::mat4 mtx) {
+                this->update(mtx);
+            }
+
+            bool intersectnearplane(Sphere sphere) {
+                const Plane plane = this->planes[planes::NEAR];
+                const float distance = glm::dot(plane.normal, sphere.pos) + plane.distance;
+                return distance < -sphere.radius ? false : true;
+            }
+
+            bool intersectpoint(glm::vec3 point) {
+                for (size_t i = 0; i < planes::COUNT; i++) {
+                    const Plane &plane = this->planes[i];
+                    if (glm::dot(plane.normal, point) + plane.distance < 0) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            size_t testsphere(Sphere sphere) {
+                ZoneScopedN("Sphere Test");
+                size_t result = intersection::INSIDE;
+                for (size_t i = 0; i < planes::COUNT; i++) {
+                    const Plane &plane = this->planes[i];
+                    const float c = glm::dot(plane.normal, sphere.pos) + plane.distance;
+                    if (c < -sphere.radius) {
+                        return intersection::OUTSIDE;
+                    }
+                    if (glm::abs(c) < sphere.radius) {
+                        result = intersection::INTERSECT;
+                    }
+                }
+                return result;
+            }
+
+            size_t testobb(OBB obb) {
+                ZoneScopedN("OBB Test");
+                // XXX: Unreliable
+                size_t result = intersection::INSIDE;
+                const glm::vec3 centre = obb.bounds.centre;
+                const glm::vec3 size = obb.bounds.extent;
+                for (size_t i = 0; i < planes::COUNT; i++) {
+                    const Plane &plane = this->planes[i];
+
+                    const glm::vec3 normal = glm::rotate(obb.orientation, plane.normal);
+                    const float r = fabs(size.x * normal.x) + fabs(size.y * normal.y) + fabs(size.z * normal.z);
+                    const float d = glm::dot(plane.normal, centre) + plane.distance;
+
+                    const float ret = fabs(d) < r ? 0.0f : d < 0.0f ? d + r : d - r;
+                    if (ret == 0.0f) {
+                        result = intersection::INTERSECT;
+                    } else if (ret < 0.0f) {
+                        return intersection::OUTSIDE;
+                    }
+                }
+                return result;
+            }
+
+            size_t testaabb(AABB aabb) {
+                size_t result = intersection::INSIDE;
+                for (size_t i = 0; i < planes::COUNT; i++) {
+                    Plane plane = this->planes[i];
+
+                    AABB representation = aabb;
+
+                    if (plane.normal.x >= 0) {
+                        representation.min.x = aabb.max.x;
+                        representation.max.x = aabb.min.x;
+                    }
+                    if (plane.normal.y >= 0) {
+                        representation.min.y = aabb.max.y;
+                        representation.max.y = aabb.min.y;
+                    }
+                    if (plane.normal.z >= 0) {
+                        representation.min.z = aabb.max.z;
+                        representation.max.z = aabb.min.z;
+                    }
+                    if ((glm::dot(plane.normal, representation.min) + plane.distance) < 0) {
+                        return intersection::OUTSIDE;
+                    }
+                    if ((glm::dot(plane.normal, representation.max) + plane.distance) < 0) {
+                        result = intersection::INTERSECT;
+                    }
+                }
+                return result;
+            }
+    };
+};
 
 #endif

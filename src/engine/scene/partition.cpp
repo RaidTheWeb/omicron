@@ -1,30 +1,12 @@
 #include <engine/math/bounds.hpp>
 #include <engine/scene/partition.hpp>
+#include <tracy/Tracy.hpp>
 
 namespace OScene {
-    #define PARTITION_CELLSIZE 300.0f
-
-    static bool checkboundswithcell(ParitionManager *manager, Cell *cell, OUtils::Handle<GameObject> obj) {
-        OUtils::Handle<ModelInstance> model = OUtils::Handle<ModelInstance>(obj);
-        OMath::AABB aabb = model->model.bounds;
-        aabb.translate(obj->getglobalposition()); // Transform from object oriented to world position
-        OMath::AABB cellbb = OMath::AABB(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(PARTITION_CELLSIZE, PARTITION_CELLSIZE, PARTITION_CELLSIZE));
-        cellbb.translate(cell->header.origin);
-
-        printf("%f %f %f to %f %f %f\n compared to %f %f %f to %f %f %f\n", aabb.min.x, aabb.min.y, aabb.min.z, aabb.max.x, aabb.max.y, aabb.max.z, cellbb.min.x, cellbb.min.y, cellbb.min.z, cellbb.max.x, cellbb.max.y, cellbb.max.z);
-
-        OMath::AABB intersection = cellbb.intersection(aabb); // Find the intersection between the two
-        printf("intersection between: %f %f %f to %f %f %f\n", intersection.min.x, intersection.min.y, intersection.min.z, intersection.max.x, intersection.max.y, intersection.max.z);
-        if (intersection == aabb) { // If they are equal that means that our AABB is exactly inside the cell.
-            printf("fits inside cell.\n");
-            return true;
-        }
-        printf("intersects across cell.\n");
-        return false; // Otherwise it does actually sit partially outside.
-    }
+    #define PARTITION_CELLSIZE 150.0f
 
     void ParitionManager::addtocell(Cell *cell, OUtils::Handle<GameObject> obj) {
-        const bool big = obj->flags & GameObject::IS_MODEL ? !checkboundswithcell(this, cell, obj) : false;
+        ZoneScoped;
         Cell *head = cell->header.prev != NULL ? this->map[cell->header.cellpos] : cell; // Head of our cell list
 
         if (cell->header.count < cell->COUNT - 1) { // This header has a free spot somewhere
@@ -62,8 +44,8 @@ namespace OScene {
 
             cell = cell->header.next;
         }
-       
-        Cell *newcell = (Cell *)this->cellallocator.alloc();
+
+        Cell *newcell = (Cell *)this->allocator.alloc();
         memset(newcell, 0, sizeof(Cell));
         for (size_t i = 0; i < newcell->COUNT; i++) {
             newcell->objects[i] = SCENE_INVALIDHANDLE;
@@ -81,7 +63,7 @@ namespace OScene {
             newcell->header.next->header.prev = newcell; // make sure we're just before the next cell
         }
         head->header.next = newcell;
-        
+
         newcell->header.count = 1;
         newcell->objects[0] = obj;
         obj->culldata = (struct GameObject::culldata) {
@@ -93,6 +75,7 @@ namespace OScene {
     }
 
     void ParitionManager::add(OUtils::Handle<GameObject> obj) {
+        ZoneScoped;
         ASSERT(obj.isvalid(), "Attempted to register invalid object to partition system.\n");
         Cell *icell = NULL;
         const glm::ivec3 cellpos = obj->getglobalposition() * (1 / PARTITION_CELLSIZE);
@@ -101,12 +84,12 @@ namespace OScene {
             icell = this->map[cellpos]; // Retrieve head of cell page list
         } else {
             glm::vec3 pos = obj->getglobalposition();
-            Cell *cell = (Cell *)this->cellallocator.alloc();
+            Cell *cell = (Cell *)this->allocator.alloc();
             memset(cell, 0, sizeof(Cell));
             for (size_t i = 0; i < cell->COUNT; i++) {
                 cell->objects[i] = SCENE_INVALIDHANDLE;
             }
-            cell->header.origin = (pos * (1 / PARTITION_CELLSIZE)) * PARTITION_CELLSIZE; // Convert to cell coordinates and back to lose precision
+            cell->header.origin = glm::vec3(cellpos.x, cellpos.y, cellpos.z) * PARTITION_CELLSIZE; // Convert to cell coordinates and back to lose precision
             cell->header.cellpos = cellpos;
             cell->header.next = NULL;
             cell->header.prev = NULL;
@@ -119,6 +102,7 @@ namespace OScene {
         this->addtocell(icell, obj);
     }
     void ParitionManager::remove(OUtils::Handle<GameObject> obj) {
+        ZoneScoped;
         ASSERT(obj.isvalid(), "Attempted to remove invalid object from partition.\n");
 
         struct GameObject::culldata &cdata = obj->culldata;
@@ -137,18 +121,18 @@ namespace OScene {
                     this->map.erase(cell->header.cellpos);
                 } else {
                     this->map[cell->header.cellpos] = cell->header.next; // Make this next cell the new head of the list
-                } 
+                }
             }
 
             if (cell->header.prev) { // Normal cell in the list
                 cell->header.prev->header.next = cell->header.next; // Make the previous cell forget we exist
             }
             if (cell->header.next) { // Normal cell somewhere inside the list
-                cell->header.next->header.prev = cell->header.prev; // Make the next cell forget we exist 
+                cell->header.next->header.prev = cell->header.prev; // Make the next cell forget we exist
             }
 
             cell->header.id = 0; // Invalidate cell (it will now be picked up as a stale reference as a cell's id will NEVER be 0)
-            this->cellallocator.free(cell); // Free from the allocator so that this may be used once again
+            this->allocator.free(cell); // Free from the allocator so that this may be used once again
         } else {
             cell->objects[cdata.objid] = SCENE_INVALIDHANDLE; // Invalidate the reference
             cell->header.count--; // Decrement the number of claimed spots
@@ -164,8 +148,9 @@ namespace OScene {
     }
 
     void ParitionManager::updatepos(OUtils::Handle<GameObject> obj) {
+        ZoneScoped;
         ASSERT(obj.isvalid(), "Attempted to remove invalid object from partition.\n");
-        
+
         if (obj->culldata.objid == SIZE_MAX) { // Not already in the system, add it.
             this->add(obj);
             return;
@@ -178,6 +163,92 @@ namespace OScene {
 
         this->remove(obj); // remove from old cell
         this->add(obj); // get us a new cell
+    }
+
+    void ParitionManager::docull(Cell *cell, ORenderer::PerspectiveCamera &camera, CullResult **ret, CullResultList *list) {
+        ZoneScoped;
+        CullResult *res = *ret;
+        size_t cursor = res->header.count;
+
+        while (cell != NULL) { // Iterate over all cells in the chain.
+            for (size_t i = 0; i < cell->header.count; i++) {
+                if (!(cell->objects[i]->flags & GameObject::typeflags::IS_CULLABLE)) {
+                    continue;
+                }
+
+                OUtils::Handle<CullableObject> obj = cell->objects[i]->gethandle<CullableObject>();
+                OMath::AABB bounds = obj->bounds;
+                // bounds = bounds.transformed(glm::translate(obj->getglobalposition()) * glm::toMat4(glm::quat(1.0f, 0.0f, 0.0f, 0.0f)) * glm::scale(obj->getglobalscale()));
+                bounds = bounds.transformed(obj->getglobalstaticmatrix());
+                // bounds = bounds.transformed(obj->getglobalmatrix());
+                // bounds.translate(obj->getglobalposition());
+                OMath::Sphere sphere = OMath::Sphere(bounds.centre, bounds.radius());
+
+                // printf("checking bounds %f %f %f to %f %f %f\n", bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z);
+                // printf("checking sphere %f %f %f %f\n", sphere.pos.x, sphere.pos.y, sphere.pos.z, sphere.radius);
+                if (camera.getfrustum().testsphere(sphere) == OMath::Frustum::OUTSIDE) {
+                // if (camera.getfrustum().testobb(OMath::OBB(bounds, obj->getglobalorientation())) == OMath::Frustum::OUTSIDE) {
+                // if (camera.getfrustum().testaabb(bounds) == OMath::Frustum::OUTSIDE) {
+                // if (!camera.getfrustum().sphereinfrustum(sphere)) {
+                    continue;
+                }
+
+                if (cursor == CullResult::COUNT) {
+                    res->header.count = cursor;
+                    res = list->acquire();
+                    cursor = 0;
+                }
+
+                res->objects[cursor++] = cell->objects[i];
+            }
+            res->header.count = cursor;
+
+            cell = cell->header.next;
+        }
+        *ret = res;
+    }
+
+    CullResult *ParitionManager::cull(ORenderer::PerspectiveCamera &camera) {
+        ZoneScoped;
+        // NOTE: We can iterate over cells in an unordered_map yay! no need for an extra shoddy array implementation!
+        if (!this->map.size()) {
+            return NULL;
+        }
+        OMath::Frustum frustum = camera.getfrustum();
+
+        CullResultList list = CullResultList(&this->allocator);
+        CullResult *res = NULL;
+
+        for (auto it = this->map.begin(); it != this->map.end(); it++) {
+            Cell *cell = it->second;
+
+            if (res == NULL) {
+                res = list.acquire();
+            }
+
+            if (frustum.testaabb(OMath::AABB(cell->header.origin, cell->header.origin + PARTITION_CELLSIZE)) == OMath::Frustum::INSIDE) {
+                size_t remaining = cell->header.count;
+                size_t srcoff = 0;
+
+                // Directly copy everything inside the cell into the result implicitly (as we can assume total containment == all are visible).
+                while (remaining > 0) {
+                    if (res->header.count == CullResult::COUNT) {
+                        res = list.acquire();
+                    }
+                    size_t remspace = CullResult::COUNT - res->header.count;
+                    size_t step = glm::min(remaining, remspace);
+
+                    memcpy(res->objects + res->header.count, cell->objects + srcoff, step * sizeof(cell->objects[0]));
+                    srcoff += step;
+                    res->header.count += step;
+                    remaining -= step;
+                }
+            // }
+            } else if (frustum.testaabb(OMath::AABB(cell->header.origin - PARTITION_CELLSIZE, cell->header.origin + PARTITION_CELLSIZE)) == OMath::Frustum::INTERSECT) {
+                this->docull(cell, camera, &res, &list);
+            }
+        }
+        return list.detach(); // Detach list from the handler.
     }
 
 }

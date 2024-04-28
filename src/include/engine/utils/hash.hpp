@@ -59,6 +59,10 @@ namespace OUtils {
         return fnv1a(str, strlen(str), hash);
     }
 
+    constexpr uint32_t STRINGID(const char *str, uint32_t hash = FNV1A_SEED) {
+        return *str != '\0' ? STRINGID(str + 1, (*str ^ hash) * FNV1A_PRIME) : hash;
+    }
+
 }
 
 #endif

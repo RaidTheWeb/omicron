@@ -2,12 +2,17 @@
 #define _ENGINE__SCENE__PARTITION_HPP
 
 #include <engine/math/math.hpp>
+#include <engine/renderer/camera.hpp>
 #include <engine/scene/gameobject.hpp>
 
 namespace OScene {
 
     // https://www.beosil.com/download/CollisionDetectionHashing_VMV03.pdf
     // Proposes a grid cell system for collision detection, however, we can use this grid cell system for culling and apply it to many use cases
+
+    class CullingFrustum {
+
+    };
 
     class CellDescriptor {
         public:
@@ -31,9 +36,9 @@ namespace OScene {
                 // Large prime numbers let us hash these values properly
                 return (uint32_t)cell.x * 73856093 + (uint32_t)cell.y * 19349663 + (uint32_t)cell.z * 83492791;
             }
-    };
+    };  
 
-    // 4096 byte aligned cells
+    // 4096 byte aligned cells (so they may fit into a page allocator)
     // NOTE: Multiple of these can be assigned to a single cell position (hence the prev and next members) so that we can exceed the arbitary limit imposed by 4096 byte alignment
     class Cell {
         public:
@@ -50,11 +55,67 @@ namespace OScene {
 
             struct header header;
     
-            static const uint32_t COUNT = (4096 - sizeof(header)) / (sizeof(OMath::Sphere) + sizeof(OUtils::Handle<GameObject>));
+            static const uint32_t COUNT = (4096 - sizeof(header)) / sizeof(OUtils::Handle<GameObject>);
     
             OUtils::Handle<GameObject> objects[COUNT];
-            OMath::Sphere spheres[COUNT];
     } __attribute__((aligned(4096)));
+
+    class CullResult {
+        public:
+            struct header {
+                // Single linked (we have no need for runtime element coherency, and additionally it's all a bunch of linear operations anyway)
+                CullResult *next = NULL;
+                // XXX: To be considered: Any code that works on culled objects could use the job system to set a job on every page worth of objects
+                uint32_t count = 0;
+            };
+
+            struct header header;
+            static const uint32_t COUNT = (4096 - sizeof(header)) / (sizeof(OUtils::Handle<GameObject>));
+            OUtils::Handle<GameObject> objects[COUNT]; 
+    } __attribute__((aligned(4096)));
+
+    class CullResultList {
+        public:
+            OUtils::PoolAllocator *allocator = NULL;
+            CullResult *begin = NULL;
+            CullResult *end = NULL;
+
+            CullResultList(OUtils::PoolAllocator *allocator) {
+                this->allocator = allocator;
+            }
+
+            ~CullResultList(void) {
+                CullResult *i = this->begin;
+                while (i != NULL) {
+                    CullResult *tmp = i;
+                    i = i->header.next;
+                    this->allocator->free(tmp);
+                }
+            }
+
+            // Detach results list from this handler.
+            CullResult *detach(void) {
+                CullResult *tmp = this->begin;
+                this->begin = NULL;
+                this->end = NULL;
+                return tmp;
+            }
+
+            // Acquire a new element for the list.
+            CullResult *acquire(void) {
+                CullResult *res = (CullResult *)this->allocator->alloc();
+                memset(res, 0, sizeof(CullResult));
+                if (this->begin == NULL) { // List is empty, initialise it.
+                    this->begin = res;
+                    this->end = res;
+                } else {
+                    this->end->header.next = res; // Add to end of list
+                    res->header.next = NULL;
+                    this->end = res; // Set this allocation as the new end of the list
+                }
+                return res;
+            }
+    };
 
     // Cells are created as needed rather than on level load or anything like that.
     // Cells are not 2D, they are 3D (allowing for better culling density)
@@ -67,15 +128,17 @@ namespace OScene {
     class ParitionManager {
         public:
             std::unordered_map<glm::ivec3, Cell *, CellDescHasher> map;
-            std::vector<Cell *> containsbig; // Contains an object whose bounds extend beyond the range of a single cell
-            OUtils::PoolAllocator cellallocator = OUtils::PoolAllocator(sizeof(Cell), 1024, 128);
+            OUtils::PoolAllocator allocator = OUtils::PoolAllocator(4096, 4096, 256); // Generic page allocator (16MB)
             CellDescHasher hasher;
             std::atomic<size_t> idcounter = 1; // Start at one so a zeroed out cell can never be valid
+            
+            // Create this only once as a constant so we can have fast runtime comparisons 
+            const OUtils::Handle<GameObject> INVALIDHANDLE = OUtils::Handle<GameObject>(NULL, SIZE_MAX, SIZE_MAX);
 
             size_t getfreespot(Cell *cell) {
                 // O(N) time complexity, unfortunate but there is no immediate solution I can think of to produce the same result. (Perhaps do what we do for the old resolution table and hash the game object to get a potential spot quicker?)  
                 for (size_t i = 0; i < cell->COUNT; i++) {
-                    if (cell->objects[i] == SCENE_INVALIDHANDLE) { // We don't use isvalid() here because it's actually faster to do a comparison when we know that this slot will be invalidated automatically when a game object is deleted (and thusly isvalid() would only really waste extra cycles on checking the handle)
+                    if (cell->objects[i] == INVALIDHANDLE) { // We don't use isvalid() here because it's actually faster to do a comparison when we know that this slot will be invalidated automatically when a game object is deleted (and thus, isvalid() would only really waste extra cycles on checking the handle)
                         return i; // Free slot here
                     }
                 }
@@ -90,6 +153,17 @@ namespace OScene {
             void remove(OUtils::Handle<GameObject> obj);
             // Update the position of an object in the partition manager system (will also add the object if it's not already there).
             void updatepos(OUtils::Handle<GameObject> obj);
+
+            void freeresults(CullResult *results) {
+                while (results != NULL) {
+                    CullResult *tmp = results; // Save this temporarily because after the page is freed we cannot guarantee it'll not be overwritten.
+                    results = results->header.next;
+                    this->allocator.free(tmp);
+                }
+            }
+
+            void docull(Cell *cell, ORenderer::PerspectiveCamera &camera, CullResult **ret, CullResultList *list);
+            CullResult *cull(ORenderer::PerspectiveCamera &camera);
     };
 }
 

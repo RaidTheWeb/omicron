@@ -3,20 +3,21 @@
 
 #include <engine/renderer/mesh.hpp>
 #include <engine/resources/serialise.hpp>
-#include <unordered_set>
+#include <engine/math/math.hpp>
 #include <engine/utils/memory.hpp>
 #include <engine/utils/pointers.hpp>
 #include <engine/utils/reflection.hpp>
+#include <unordered_set>
 #include <vector>
 
 namespace OScene {
     // XXX: GRAHHHHHH, we might want a system that uses components to make it easier to program, but idk
 
-    class GameObjectAllocator : public OUtils::SlabAllocator {
+    class GameObjectAllocator {
         public:
             OUtils::SlabAllocator::Slab slabs[8];
 
-            GameObjectAllocator() {
+            GameObjectAllocator(const char *name = NULL) {
                 // This all consumes a lot of memory, so we'll need to restrict this a lot, and this only needs to be for dynamic objects (static objects can be allocated separately)
                 // XXX: Figure out static distinction
                 this->slabs[0].init(128, 16384);
@@ -28,18 +29,85 @@ namespace OScene {
                 this->slabs[6].init(8096, 4096);
                 this->slabs[7].init(16384, 4096);
             }
+
+            OUtils::SlabAllocator::Slab *optimalslab(size_t size) {
+                for (size_t i = 0; i < sizeof(this->slabs) / sizeof(this->slabs[0]); i++) {
+                    OUtils::SlabAllocator::Slab *slab = &this->slabs[i];
+                    // Slab allocator
+                    if (slab->entsize >= size && slab->allocator.allocblock != NULL) {
+                        return slab;
+                    }
+                }
+                return NULL;
+            }
+
+            void *alloc(size_t size) {
+                OUtils::SlabAllocator::Slab *slab = this->optimalslab(size);
+                if (slab != NULL) {
+                    void *allocation = slab->alloc(size);
+                    TracySecureAllocN(allocation, sizeof(struct OUtils::SlabAllocator::metadata) + size, "GameObjects and Components");
+                    return allocation;
+                }
+
+                // Fallback to host memory allocator (yikers!)
+                struct OUtils::SlabAllocator::metadata *allocation = (struct OUtils::SlabAllocator::metadata *)malloc(size + sizeof(struct OUtils::SlabAllocator::metadata));
+                ASSERT(allocation != NULL, "Failed to allocate memory from fallback host memory allocator.\n");
+                allocation->size = size;
+                TracySecureAllocN(allocation, sizeof(struct OUtils::SlabAllocator::metadata) + size, "GameObjects and Components Host Fallback");
+                TracySecureAllocN(allocation, sizeof(struct OUtils::SlabAllocator::metadata) + size, "GameObjects and Components");
+                return allocation + 1;
+            }
+
+            virtual void free(void *ptr) {
+                struct OUtils::SlabAllocator::metadata *allocation = (struct OUtils::SlabAllocator::metadata *)((uint8_t *)ptr - sizeof(struct OUtils::SlabAllocator::metadata));
+                OUtils::SlabAllocator::Slab *slab = this->optimalslab(allocation->size);
+                if (slab != NULL) {
+                    TracySecureFreeN(allocation, "GameObjects and Components");
+                    slab->free(allocation);
+                } else {
+                    TracySecureFreeN(allocation, "GameObjects and Components Host Fallback");
+                    std::free(allocation);
+                }
+            }
+
     };
 
+    // Shared between both objects and components (as it is just a generic slab allocator)
     extern GameObjectAllocator objallocator;
     extern std::atomic<size_t> objidcounter;
 
     extern OUtils::ResolutionTable table;
 #define SCENE_INVALIDHANDLE OUtils::Handle<OScene::GameObject>(NULL, SIZE_MAX, SIZE_MAX)
-    
+
+    // Early exit on invalid objects/components
+#define SCENE_INVALIDATION() \
+        if (this->invalid) { \
+            return; \
+        }
+
+#define COMPONENT_GETRESOLVER(...) \
+        switch (type) { \
+            __VA_ARGS__ \
+            default: \
+                ASSERT(false, "An invalid component was requested of object.\n"); \
+        };
+
+#define COMPONENT_GETRESOLUTION(TYPE, COMPONENT) \
+        case (TYPE): return (COMPONENT);
+
+#define COMPONENT_HASRESOLVER(...) \
+        switch (type) { \
+            __VA_ARGS__ \
+            default: \
+                return false; \
+        };
+
+#define COMPONENT_HASRESOLUTION(TYPE) \
+        case (TYPE): return true;
 
     class Scene;
-    // This should be pooled, but we have to use the biggest sized object... (static max for everything?)
-    // Small allocator (literally just a slab allocator)
+    class Component;
+
     class GameObject {
         private:
             bool poolallocated; // allocated dynamically
@@ -52,16 +120,25 @@ namespace OScene {
             enum typeflags {
                 IS_DYNAMIC = (1 << 0), // should be updated on every game loop cycles
                 IS_MODEL = (1 << 1), // possesses a renderable model
-                IS_INVISIBLE = (1 << 2), // refuse to render
+                IS_CULLABLE = (1 << 2), // possesses bounds
+                IS_INVISIBLE = (1 << 3), // refuse to render
             };
             uint32_t flags = 0; // So that we can cast between types at runtime
+
+            uint64_t components = 0;
 
             // Transform data
             glm::vec3 position = glm::vec3(0.0f);
             glm::quat orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
             glm::vec3 scale = glm::vec3(1.0f);
             glm::mat4 matrix;
-            std::atomic<bool> dirty = true;
+            glm::mat4 staticmatrix;
+            enum dirtyflags {
+                DIRTY_MATRIX = (1 << 0),
+                DIRTY_STATIC = (1 << 1),
+                DIRTY_ALL = DIRTY_MATRIX | DIRTY_STATIC
+            };
+            std::atomic<uint8_t> dirty = dirtyflags::DIRTY_ALL;
 
             uint32_t type = OUtils::fnv1a("GameObject");
 
@@ -76,9 +153,12 @@ namespace OScene {
             struct culldata {
                 glm::ivec3 cellpos; // Position of the cell this game object occupies (used to validate a cell page tree exists)
                 size_t objid = SIZE_MAX; // ID in cell data
-                void *pageref = NULL; // Pointer reference to the current cell page (Used to index directly into linked list of cells) 
+                void *pageref = NULL; // Pointer reference to the current cell page (Used to index directly into linked list of cells)
                 size_t pageid; // Backup ID to prevent stale references to old cells (cells are pool allocated, although this shouldn't be much of a problem as we memset new allocations anyway)
             } culldata;
+
+            virtual void construct(void) { }
+            virtual void deconstruct(void) { }
 
             template <typename T>
             static T *create(bool poolalloc = true) {
@@ -87,27 +167,32 @@ namespace OScene {
                     allocation = (GameObject *)objallocator.alloc(sizeof(T));
                     T t = T();
                     memcpy(allocation, &t, sizeof(T));
-                    ((GameObject *)&t)->invalid = true; // invalidate object
+                    // ((GameObject *)&t)->invalid = true; // invalidate object
                     allocation->poolallocated = true;
                 } else {
                     allocation = (GameObject *)malloc(sizeof(T));
                     ASSERT(allocation != NULL, "Failed to allocate memory for game object from host allocator.\n");
                     T t = T();
                     memcpy(allocation, &t, sizeof(T));
-                    ((GameObject *)&t)->invalid = true; // invalidate object
+                    // ((GameObject *)&t)->invalid = true; // invalidate object
                     allocation->poolallocated = false;
                 }
                 allocation->handle = table.bind(allocation);
                 allocation->id = objidcounter.fetch_add(1);
+                allocation->construct();
                 return (T *)allocation;
             }
 
-            void operator delete(void *ptr) {
-                if (((GameObject *)ptr)->poolallocated) {
-                    objallocator.free(ptr);
+            static void destroy(OUtils::Handle<GameObject> obj) {
+                obj->deconstruct();
+                size_t handle = obj->handle;
+                if (obj->poolallocated) {
+                    objallocator.free(obj.resolve());
+                    table.release(obj->handle);
                     return;
                 } else {
-                    free(ptr);
+                    free(obj.resolve());
+                    table.release(obj->handle);
                 }
             }
 
@@ -116,12 +201,21 @@ namespace OScene {
                 return OUtils::Handle<GameObject>(&table, this->handle, this->id);
             }
 
-            virtual void serialise(OResource::Serialiser *serialiser) {
+            // Get a handle to our object as another object type
+            template <typename T>
+            OUtils::Handle<T> gethandle(void) {
+                return OUtils::Handle<T>(&table, this->handle, this->id);
             }
 
-            virtual void deserialise(OResource::Serialiser *serialiser) {
-            }
+            virtual void serialise(OResource::Serialiser *serialiser) { }
+            virtual void deserialise(OResource::Serialiser *serialiser) { }
 
+            virtual OUtils::Handle<Component> getcomponent(uint32_t type) { return OUtils::Handle<Component>(NULL, SIZE_MAX, SIZE_MAX); }
+            virtual bool hascomponent(uint32_t type) { return false; }
+
+            // Returns the static matrix (not orientated) of the object.
+            glm::mat4 getstaticmatrix(void);
+            glm::mat4 getglobalstaticmatrix(void);
             glm::mat4 getmatrix(void);
             glm::mat4 getglobalmatrix(void);
             glm::vec3 getglobalposition(void);
@@ -143,15 +237,89 @@ namespace OScene {
             void scaleby(glm::vec3 s);
     };
 
+    class CullableObject : public GameObject {
+        public:
+            OMath::AABB bounds;
+
+            CullableObject(void) {
+                this->flags |= IS_CULLABLE;
+            }
+    };
+
+    class Component {
+        private:
+            size_t handle = 0;
+            bool poolallocated;
+            OUtils::Handle<GameObject> owner;
+        public:
+            size_t id = 0;
+            bool invalid;
+
+            virtual void construct(void) { }
+            virtual void deconstruct(void) { }
+
+            template <typename T>
+            static T *create(OUtils::Handle<GameObject> owner, bool poolalloc = true) {
+                Component *allocation = NULL;
+                if (poolalloc) {
+                    allocation = (Component *)objallocator.alloc(sizeof(T));
+                    T t = T();
+                    memcpy(allocation, &t, sizeof(T));
+                    // ((Component *)&t)->invalid = true; // invalidate object
+                    allocation->poolallocated = true;
+                } else {
+                    allocation = (Component *)malloc(sizeof(T));
+                    ASSERT(allocation != NULL, "Failed to allocate memory for game object from host allocator.\n");
+                    T t = T();
+                    memcpy(allocation, &t, sizeof(T));
+                    // ((Component *)&t)->invalid = true; // invalidate object
+                    allocation->poolallocated = false;
+                }
+                allocation->handle = table.bind(allocation);
+                allocation->id = objidcounter.fetch_add(1);
+                allocation->owner = owner;
+                allocation->construct();
+                return (T *)allocation;
+            }
+
+            static void destroy(OUtils::Handle<Component> component) {
+                component->deconstruct();
+                size_t handle = component->handle;
+                if (component->poolallocated) {
+                    objallocator.free(component.resolve());
+                    table.release(handle);
+                    return;
+                } else {
+                    free(component.resolve());
+                    table.release(handle);
+                }
+            }
+
+            virtual void serialise(OResource::Serialiser *serialiser) { }
+
+            virtual void deserialise(OResource::Serialiser *serialier) { }
+
+            // Get a handle to our component
+            OUtils::Handle<Component> gethandle(void) {
+                return OUtils::Handle<Component>(&table, this->handle, this->id);
+            }
+
+            // Get a handle to our component as a different component type
+            template <typename T>
+            OUtils::Handle<T> gethandle(void) {
+                return OUtils::Handle<T>(&table, this->handle, this->id);
+            }
+    };
+
     // Omnidirectional light
-    class PointLight : public GameObject {
+    class PointLight : public Component {
         public:
             glm::vec3 colour = glm::vec3(1.0f);
             float intensity = 1.0f;
             float range = 1.0f;
 
             PointLight(void) {
-                this->type = OUtils::fnv1a("PointLight");
+                // this->type = OUtils::fnv1a("PointLight");
             }
 
             void serialise(OResource::Serialiser *serialiser) {
@@ -168,25 +336,35 @@ namespace OScene {
     };
 
     // Light with specific cone of influence
-    class SpotLight : public GameObject {
+    class SpotLight : public Component {
         public:
             glm::vec3 colour = glm::vec3(1.0f);
             float intensity = 1.0f;
 
             SpotLight(void) {
-                this->type = OUtils::fnv1a("SpotLight");
+                // this->type = OUtils::fnv1a("SpotLight");
+            }
+
+            void serialise(OResource::Serialiser *serialiser) {
+                serialiser->write<glm::vec3>(&this->colour);
+                serialiser->write<float>(&this->intensity);
+            }
+
+            void deserialise(OResource::Serialiser *serialiser) {
+                serialiser->read<glm::vec3>(&this->colour);
+                serialiser->read<float>(&this->intensity);
             }
     };
 
     // Game object tied to one or more meshes
-    class ModelInstance : public GameObject {
+    class ModelInstance : public Component {
         public:
-            ORenderer::Model model;
+            ORenderer::Model *model;
             char *modelpath;
 
             ModelInstance(void) {
-                flags |= GameObject::IS_MODEL;
-                this->type = OUtils::fnv1a("ModelInstance");
+                // flags |= GameObject::IS_MODEL;
+                // this->type = OUtils::fnv1a("ModelInstance");
             }
 
             void serialise(OResource::Serialiser *serialiser) {
@@ -212,10 +390,57 @@ namespace OScene {
                         serialiser->read<char>(&this->modelpath[i]);
                     }
                     this->modelpath[len] = '\0';
-                    this->model = ORenderer::Model(this->modelpath);
+                    this->model = new ORenderer::Model(this->modelpath);
                 }
             }
     };
+
+    class Test : public CullableObject {
+        public:
+            OUtils::Handle<ModelInstance> model;
+            OUtils::Handle<SpotLight> light;
+
+            void construct(void) {
+                this->type = OUtils::STRINGID("Test");
+                this->model = Component::create<ModelInstance>(this->gethandle())->gethandle<ModelInstance>();
+                this->light = Component::create<SpotLight>(this->gethandle())->gethandle<SpotLight>();
+            }
+
+            void deconstruct(void) {
+                Component::destroy(this->model);
+                Component::destroy(this->light);
+            }
+
+            bool hascomponent(uint32_t type) {
+                COMPONENT_HASRESOLVER(
+                    COMPONENT_HASRESOLUTION(OUtils::STRINGID("ModelInstance"));
+                    COMPONENT_HASRESOLUTION(OUtils::STRINGID("SpotLight"));
+                );
+            }
+
+            OUtils::Handle<Component> getcomponent(uint32_t type) {
+                COMPONENT_GETRESOLVER(
+                    COMPONENT_GETRESOLUTION(OUtils::STRINGID("ModelInstance"), this->model);
+                    COMPONENT_GETRESOLUTION(OUtils::STRINGID("SpotLight"), this->light);
+                );
+            }
+
+            void serialise(OResource::Serialiser *serialiser) {
+                this->model->serialise(serialiser);
+                this->light->serialise(serialiser);
+            }
+
+            void deserialise(OResource::Serialiser *serialiser) {
+                this->model->deserialise(serialiser);
+                this->light->deserialise(serialiser);
+            }
+
+            void silly(void) {
+                // printf("%f\n", this->light->intensity);
+                // printf("%s\n", this->model->modelpath);
+            }
+    };
+
 
     // Handle adding the game object types to the reflection table.
     void setupreflection(void);

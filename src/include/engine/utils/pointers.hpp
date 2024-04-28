@@ -88,7 +88,15 @@ namespace OUtils {
             }
 
             void *get(size_t handle) {
-                return this->table[handle];
+                const auto res = this->table.find(handle);
+                if (res != this->table.end()) {
+                    return res->second;
+                } else {
+                    ASSERT(false, "Invalid handle %lu requested of resolution table, something is seriously wrong.\n", handle);
+                    // TODO: Consider how to act when a handle is invalidated. Typically we'd be okay as returning a result would leave us with nothing of value, marking the pointer as invalid.
+                    // But what if later on we're trying to do work with an object? what do we do then now that the object is invalid?
+                    return NULL; // XXX: Can you even return from this in confidence? We'd assume when resolving a pointer we'd check its validity first, but I guess not.
+                }
             }
     };
 #endif
@@ -147,6 +155,13 @@ namespace OUtils {
             }
 
             T *operator ->(void) {
+                ASSERT(this->objhandle != SIZE_MAX, "Attempted to reference invalid handle.\n");
+                T *ptr = (T *)this->table->get(this->objhandle);
+                ASSERT(ptr != NULL && ptr->id == this->objid, "Attempted to dereference stale pointer.\n");
+                return ptr;
+            }
+
+            T *resolve(void) {
                 ASSERT(this->objhandle != SIZE_MAX, "Attempted to reference invalid handle.\n");
                 T *ptr = (T *)this->table->get(this->objhandle);
                 ASSERT(ptr != NULL && ptr->id == this->objid, "Attempted to dereference stale pointer.\n");

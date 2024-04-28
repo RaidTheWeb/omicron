@@ -1,7 +1,8 @@
+#include <common/TracySystem.hpp>
 #include <engine/concurrency/job.hpp>
 #include <errno.h>
-#include <unistd.h>
 #include <engine/utils/memory.hpp>
+#include <unistd.h>
 
 // XXX: This is not OS agnostic!!!!!
 // XXX: Super high CPU usage! (Figure out how to prevent problems such as this)
@@ -17,7 +18,7 @@ namespace OJob {
     pthread_spinlock_t spin;
     struct OJob::worker workers[JOB_MAXWORKERS];
 
-    OUtils::PoolAllocator allocator = OUtils::PoolAllocator(sizeof(class Job), 16896); // we have a memory pool equal to the queue size for jobs
+    OUtils::PoolAllocator allocator = OUtils::PoolAllocator(sizeof(class Job), 16896, MEMORY_POOLALLOCEXPAND, "Jobs"); // we have a memory pool equal to the queue size for jobs
 
     void *Job::operator new(size_t _) {
         (void)_;
@@ -74,6 +75,7 @@ namespace OJob {
     }
 
     void kickjob(OJob::Job *job) {
+        // ZoneScoped;
         ASSERT(job->priority < Job::PRIORITY_COUNT, "Invalid job priority %u.\n", job->priority);
 
         if (job->counter) {
@@ -155,6 +157,11 @@ namespace OJob {
     thread_local Fibre *currentfibre;
 
     [[noreturn]] static void workerthread(int *id) {
+        // ZoneScoped;
+        char *name = (char *)malloc(32);
+        snprintf(name, 32, "Worker Thread %u", *id);
+        tracy::SetThreadName(name);
+
         struct OJob::worker *worker = &OJob::workers[*id];
         for (;;) {
             // acquire lock for job schedule
@@ -174,7 +181,9 @@ namespace OJob {
             decl->fibre = fibre;
 
             OJob::currentfibre = fibre;
+            TracyFiberEnter(fibre->name);
             coroutine_resume(fibre->co);
+            TracyFiberLeave;
             OJob::currentfibre = NULL;
 
             // all job and fibre cleanup code past this point (helps prevent resume-before-yield errors)
@@ -202,6 +211,9 @@ namespace OJob {
             }
 
             if (fibre->yieldstatus == OJob::Job::STATUS_DONE) {
+                if (fibre->job->counter != NULL) {
+                    fibre->job->counter->unreference(); // unreference when done.
+                }
                 fibre->job = NULL;
                 pthread_mutex_lock(&OJob::fibremutex);
                 OJob::freefibres.push(fibre); // only push after the coroutine exits, this way the fibre doesn't get acquired before the coroutine is properly yielded
@@ -210,6 +222,28 @@ namespace OJob {
             }
         }
         __builtin_unreachable();
+    }
+
+    void destroy(void) {
+        int numcores = 1;
+#ifdef __linux__
+        numcores = sysconf(_SC_NPROCESSORS_ONLN);
+#endif
+
+#ifdef __unix__
+        for (size_t i = 0; i < numcores; i++) {
+            pthread_cancel(OJob::workers[i].thread);
+            // TODO: Core affinity
+        }
+#endif
+        pthread_mutex_destroy(&availablemutex);
+        pthread_mutex_destroy(&fibremutex);
+
+        OJob::Fibre *fibre = NULL;
+        while ((fibre = (OJob::Fibre *)OJob::freefibres.pop()) != NULL) {
+            coroutine_destroy(fibre->co);
+            delete fibre;
+        }
     }
 
     std::atomic<size_t> id;
@@ -227,6 +261,8 @@ namespace OJob {
             struct coroutine_desc desc = coroutine_initdesc(OJob::fibre, 0);
             desc.userdata = fibre;
             fibre->id = i;
+            fibre->name = (char *)malloc(32);
+            snprintf(fibre->name, 32, "Fibre %lu\n", fibre->id);
             struct coroutine *co;
             int res = coroutine_create(&co, &desc);
             ASSERT(!res, "Coroutine could not be created.\n");

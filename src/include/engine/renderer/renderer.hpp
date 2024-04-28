@@ -77,6 +77,10 @@ namespace ORenderer {
             uint8_t type;
             void *code;
             size_t size;
+            
+            Shader(void) {
+
+            }
 
             Shader(const char *path, uint8_t type) { 
                 ASSERT(path != NULL, "Attempted to load shader with NULL path.\n");
@@ -795,6 +799,7 @@ namespace ORenderer {
     };
 
     class Stream;
+    class ScratchBuffer;
 
     class RendererContext {
         public:
@@ -836,11 +841,14 @@ namespace ORenderer {
             // Copy data between two buffers.
             virtual uint8_t copybuffer(struct buffercopydesc *desc) { return RESULT_SUCCESS; }
             // Create the renderer backbuffer(s).
-            virtual uint8_t createbackbuffer(struct renderpass pass) { return RESULT_SUCCESS; }
+            virtual uint8_t createbackbuffer(struct renderpass pass, struct ORenderer::textureview *depth = NULL) { return RESULT_SUCCESS; }
             // Request a reference to the backbuffer of the current frame.
             virtual uint8_t requestbackbuffer(struct framebuffer *framebuffer) { return RESULT_SUCCESS; }
+            virtual uint8_t requestbackbuffertexture(struct texture *texture) { return RESULT_SUCCESS; }
             // Request information pertaining to the current size of the backbuffer and the selected data format for it.
             virtual uint8_t requestbackbufferinfo(struct backbufferinfo *info) { return RESULT_SUCCESS; }
+            // Request a reference to the current frame's scratchbuffer.
+            virtual uint8_t requestscratchbuffer(ScratchBuffer **scratchbuffer) { return RESULT_SUCCESS; };
             // Transition texture between image layouts.
             virtual uint8_t transitionlayout(struct texture texture, size_t format, size_t state) { return RESULT_SUCCESS; }
 
@@ -872,7 +880,65 @@ namespace ORenderer {
 
             // Adjust a projection matrix to represent the intended results from GLM
             virtual void adjustprojection(glm::mat4 *mtx) { }
+            // Adjust top and bottom for intended results from GLM.
+            virtual void adjustorthoprojection(float *top, float *bottom) { };
+            virtual void flushrange(struct buffer buffer, size_t size) { };
     };
+
+    class ScratchBuffer {
+        public:
+            struct ORenderer::buffer buffer;
+            struct ORenderer::buffermap map;
+            size_t size;
+            size_t pos;
+            size_t alignment;
+            RendererContext *ctx;
+
+            ScratchBuffer(void) { };
+
+            void reset(void) {
+                this->pos = 0;
+            }
+
+            void create(RendererContext *ctx, size_t size, size_t count, size_t alignment) {
+                this->alignment = alignment;
+                this->ctx = ctx;
+                const size_t entsize = utils_stridealignment(size, this->alignment);
+        
+                struct ORenderer::bufferdesc desc = { };
+                desc.size = entsize * count;
+                desc.usage = ORenderer::BUFFER_UNIFORM;
+                // exists on the GPU itself but we allow the CPU to see that memory and pass data to it when flushing the ranges, we also need random access to the memory as we rarely are writing from start to finish in its entirety.
+                desc.memprops = ORenderer::MEMPROP_GPULOCAL | ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPURANDOMACCESS;
+                ASSERT(this->ctx->createbuffer(&desc, &this->buffer) == ORenderer::RESULT_SUCCESS, "Failed to create scratch buffer.\n");
+
+                this->size = entsize * count;
+                this->pos = 0;
+
+                struct ORenderer::buffermapdesc mapdesc = { };
+                mapdesc.buffer = this->buffer;
+                mapdesc.size = entsize * count;
+                mapdesc.offset = 0;
+                ASSERT(this->ctx->mapbuffer(&mapdesc, &this->map) == ORenderer::RESULT_SUCCESS, "Failed to map scratch buffer.\n");
+            }
+
+            size_t write(const void *data, size_t size) {
+                ASSERT(this->pos + size < this->size, "Not enough space for scratchbuffer write of %lu bytes.\n", size);
+                size_t off = this->pos;
+                
+                memcpy(&((uint8_t *)this->map.mapped[0])[this->pos], data, size);
+
+                this->pos += utils_stridealignment(size, this->alignment);
+
+                return off;
+            }
+
+            void flush(void) {
+                const size_t size = glm::min((size_t)utils_stridealignment(this->pos, this->alignment), this->size);
+                this->ctx->flushrange(this->buffer, size);
+            }
+    };
+
 
 
     extern RendererContext *context;
@@ -933,8 +999,8 @@ namespace ORenderer {
                 bool index32;
             } idxbuffer;
             struct {
-                struct buffer *buffers;
-                size_t *offsets;
+                struct buffer buffers[4]; // maximum bind count
+                size_t offsets[4];
                 size_t firstbind;
                 size_t bindcount;
             } vtxbuffers;
@@ -987,6 +1053,11 @@ namespace ORenderer {
                 void *src;
                 size_t size;
             } stagedmemcopy;
+            struct {
+                char *name;
+                void *zone;
+            } zonebegin;
+            size_t zoneend;
         };
     }; 
 
@@ -998,7 +1069,7 @@ namespace ORenderer {
             // these few variables after this are cleared every frame
             std::vector<struct streamnibble> cmd;
             // we keep some temporary memory per-frame in order to allow us to offer persistence to data instead of letting it go out of scope, used for anything pointer related (eg. copy to temporary buffer and free later)
-            OUtils::StackAllocator tempmem = OUtils::StackAllocator(8096); // a stack allocator is suitable for our purposes as we can allocate or free from a preallocated block of memory to reduce the overhead from malloc() and free() (makes a big difference as it adds up)
+            OUtils::StackAllocator tempmem = OUtils::StackAllocator(16384); // a stack allocator is suitable for our purposes as we can allocate or free from a preallocated block of memory to reduce the overhead from malloc() and free() (makes a big difference as it adds up)
             // temporary storage for descriptor mappings per pipeline state
             std::vector<struct pipelinestateresourcemap> mappings;
             // temporary reference to the active pipeline state
@@ -1018,16 +1089,20 @@ namespace ORenderer {
                 OP_COMMITRESOURCES,
                 OP_TRANSITIONLAYOUT,
                 OP_COPYBUFFERIMAGE,
-                OP_STAGEDMEMCOPY
+                OP_STAGEDMEMCOPY,
+                OP_DEBUGZONEBEGIN,
+                OP_DEBUGZONEEND
             };
            
             // Lock the stream to protect against out-of-order command submission (not strictly needed, but useful to prevent race conditions).
             void claim(void) {
                 this->mutex.lock();
+                this->tempmem.claim();
             }
 
             // Release stream to allow it to be claimed again.
             void release(void) {
+                this->tempmem.release();
                 this->mutex.unlock();
             }
 
@@ -1036,18 +1111,6 @@ namespace ORenderer {
                 this->cmd.clear();
                 this->tempmem.clear();
                 this->mappings.clear();
-            }
-
-            inline struct buffer *allocfor(struct buffer *buffers, size_t count) {
-                struct buffer *allocation = (struct buffer *)this->tempmem.alloc(sizeof(struct buffer) * count);
-                memcpy(allocation, buffers, sizeof(struct buffer) * count);
-                return allocation;
-            }
-
-            inline size_t *allocfor(size_t *offsets, size_t count) {
-                size_t *allocation = (size_t *)this->tempmem.alloc(sizeof(size_t) * count);
-                memcpy(allocation, offsets, sizeof(size_t) * count);
-                return allocation;
             }
 
             // Set viewport for renderering.
@@ -1103,13 +1166,33 @@ namespace ORenderer {
 
             // Set the current vertex buffers for use before a draw call.
             void setvtxbuffers(struct buffer *buffers, size_t *offsets, size_t firstbind, size_t bindcount) {
+                ASSERT(bindcount <= 4, "Too many vertex buffers submitted to stream at once.\n");
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_SETVTXBUFFERS, .vtxbuffers = {
-                    .buffers = this->allocfor(buffers, bindcount),
-                    .offsets = this->allocfor(offsets, bindcount),
+                struct streamnibble nibble = (struct streamnibble) { .type = OP_SETVTXBUFFERS, .vtxbuffers = {
+                    .buffers = { },
+                    .offsets = { },
                     .firstbind = firstbind,
                     .bindcount = bindcount
-                } });
+                } };
+                for (size_t i = 0; i < bindcount; i++) {
+                    nibble.vtxbuffers.buffers[i] = buffers[i];
+                    nibble.vtxbuffers.offsets[i] = offsets[i];
+                }
+
+                this->cmd.push_back(nibble);
+                // this->mutex.unlock();
+            }
+
+            void setvtxbuffer(struct buffer buffer, size_t offset) {
+                // this->mutex.lock();
+                struct streamnibble nibble = (struct streamnibble) { .type = OP_SETVTXBUFFERS, .vtxbuffers = {
+                    .buffers = { buffer },
+                    .offsets = { offset },
+                    .firstbind = 0,
+                    .bindcount = 1
+                } };
+
+                this->cmd.push_back(nibble);
                 // this->mutex.unlock();
             }
 
@@ -1181,15 +1264,10 @@ namespace ORenderer {
                 // stream->mutex.lock();
                 stream->claim();
                 for (auto it = stream->cmd.begin(); it != stream->cmd.end(); it++) {
-                    if (it->type == OP_SETVTXBUFFERS) {
-                        this->cmd.push_back((struct streamnibble) { .type = OP_SETVTXBUFFERS, .vtxbuffers = {
-                            .buffers = this->allocfor(it->vtxbuffers.buffers, it->vtxbuffers.bindcount),
-                            .offsets = this->allocfor(it->vtxbuffers.offsets, it->vtxbuffers.bindcount),
-                            .firstbind = it->vtxbuffers.firstbind,
-                            .bindcount = it->vtxbuffers.bindcount
-                        } });
+                    if (it->type == OP_DEBUGZONEBEGIN) {
+                        this->zonebegin(it->zonebegin.name);
                     } else {
-                        this->cmd.push_back(*it);
+                       this->cmd.push_back(*it);
                     }
                 }
 
@@ -1207,15 +1285,55 @@ namespace ORenderer {
                     .size = size
                 } });
             }
+
+            size_t zonebegin(const char *name) {
+                size_t len = strnlen(name, 63);
+                char *tmp = (char *)this->tempmem.alloc(len + 1); // Hard limit here to prevent a pipeline zone name from consuming all of the stack memory.
+                memset(tmp, 0, len + 1);
+                strncpy(tmp, name, len);
+                size_t index = this->cmd.size();
+                this->cmd.push_back((struct streamnibble) { .type = OP_DEBUGZONEBEGIN, .zonebegin = {
+                    .name = tmp,
+                    .zone = NULL
+                } });
+                return index;
+            }
+            
+            void zoneend(size_t zone) {
+                this->cmd.push_back((struct streamnibble) { .type = OP_DEBUGZONEEND, .zoneend = zone });
+            }
     };
 
-    // add with value
-    // OMICRON_EXPORT void renderer_addlocalstorage(struct renderer_localstorage *local, uint32_t key, void *value);
-    // find and replace
-    // OMICRON_EXPORT void renderer_setlocalstorage(struct renderer_localstorage *local, uint32_t key, void *value);
-    // OMICRON_EXPORT void *renderer_getlocalstorage(struct renderer_localstorage *local, uint32_t key);
+    // Upload data of a certain size to an offset in a buffer (this can be on a GPU or on the CPU itself, doesn't matter, all this does is do a staging buffer copy).
+    static inline void uploadtobuffer(ORenderer::buffer buffer, size_t size, void *data, size_t off = 0) {
+        // TODO: Consider using mapped memory if supported to allow for a quicker upload.
+        struct ORenderer::bufferdesc bufferdesc = { };
+        bufferdesc.size = size;
+        bufferdesc.usage = ORenderer::BUFFER_TRANSFERSRC;
+        bufferdesc.memprops = ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPUCOHERENT | ORenderer::MEMPROP_CPUSEQUENTIALWRITE;
+        bufferdesc.flags = 0;
+        struct ORenderer::buffer staging = { };
+        ASSERT(ORenderer::context->createbuffer(&bufferdesc, &staging) == ORenderer::RESULT_SUCCESS, "Failed to create staging buffer.\n");
 
-    // OMICRON_EXPORT struct game_object **renderer_visible(struct renderer *renderer);
+        struct ORenderer::buffermapdesc stagingmapdesc = { };
+        stagingmapdesc.buffer = staging;
+        stagingmapdesc.size = size;
+        stagingmapdesc.offset = 0;
+        struct ORenderer::buffermap stagingmap = { };
+        ASSERT(ORenderer::context->mapbuffer(&stagingmapdesc, &stagingmap) == ORenderer::RESULT_SUCCESS, "Failed to map staging buffer.\n");
+        memcpy(stagingmap.mapped[0], data, size);
+        ORenderer::context->unmapbuffer(stagingmap);
+
+        struct ORenderer::buffercopydesc buffercopy = { };
+        buffercopy.src = staging;
+        buffercopy.dst = buffer;
+        buffercopy.srcoffset = 0;
+        buffercopy.dstoffset = off;
+        buffercopy.size = size;
+        ORenderer::context->copybuffer(&buffercopy);
+
+        ORenderer::context->destroybuffer(&staging);
+    }
 
     struct renderer {
         // struct camera *camera;

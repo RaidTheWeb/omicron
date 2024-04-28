@@ -3,11 +3,11 @@
 
 #include <atomic>
 #include <engine/concurrency/coroutine.hpp>
-#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <engine/utils.hpp>
 #include <engine/utils/queue.hpp>
+#include <tracy/Tracy.hpp>
 #include <vector>
 
 namespace OJob {
@@ -60,30 +60,18 @@ namespace OJob {
 
             OJob::Fibre *fibre;
             enum priority priority = PRIORITY_NORMAL;
-            std::atomic<bool> running;
-            std::atomic<bool> waiting;
-            std::atomic<bool> done;
+            std::atomic<bool> running = false;
             OJob::Counter *counter;
             size_t id;
-            pthread_spinlock_t lock;
-            std::atomic<int> state;
             void (*entry)(OJob::Job *job);
             uintptr_t param;
 
-            Job(void (*entry)(OJob::Job *job), uintptr_t param) {
-                this->waiting.store(false);
-                this->running.store(false);
-                this->done.store(false);
-
+            Job(void (*entry)(OJob::Job *job), uintptr_t param) { 
                 this->entry = entry;
                 this->param = param;
                 this->counter = NULL;
                 this->fibre = NULL;
                 this->id = OJob::id.fetch_add(1);
-                pthread_spin_init(&this->lock, true);
-            }
-            ~Job(void) {
-                pthread_spin_destroy(&this->lock);
             }
 
             // Overrides so that we use the pool allocator rather than
@@ -99,6 +87,7 @@ namespace OJob {
 
     class Fibre {
         public:
+            char *name;
             size_t id;
             enum OJob::Job::status yieldstatus;
             struct coroutine *co;
@@ -133,6 +122,7 @@ namespace OJob {
             pthread_spinlock_t waitlistlock;
 
             void lock(void) {
+                ZoneScopedN("Mutex Lock");
                 // ASSERT(job_currentfibre != NULL, "Mutex lock outside of job system! Please use pthread spinlocks instead for synchronising current operations outside of Omicron's job system!\n");
 
                 if (currentfibre == NULL) { // experimental outside-of-job-system mutex usage
@@ -159,6 +149,7 @@ namespace OJob {
                 }
             }
             void unlock(void) {
+                ZoneScopedN("Mutex Unlock");
                 // ASSERT(job_currentfibre != NULL, "Mutex unlock outside of job system! Please use pthread spinlocks instead for synchronising current operations outside of Omicron's job system!\n");
                 if (this->ref.load()) {
                     pthread_spin_lock(&this->waitlistlock);
@@ -213,6 +204,7 @@ namespace OJob {
     void kickjobswait(int count, OJob::Job *jobs[]);
 
     void init(void);
+    void destroy(void);
 
 }
 

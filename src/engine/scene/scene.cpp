@@ -48,6 +48,8 @@ namespace OScene {
             this->objects.push_back(obj->gethandle());
         }
 
+        fclose(f);
+
         // TODO: Concurrent (split into chunks and shove work onto each job)
         size_t numobjects = this->objects.size();
         // Split objects into chunks
