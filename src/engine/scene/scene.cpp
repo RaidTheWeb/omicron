@@ -22,7 +22,7 @@ namespace OScene {
 
             ASSERT(OUtils::reflectiontable.find(gobj.type) != OUtils::reflectiontable.end(), "Invalid object type (not registered in reflection table).\n");
 
-            // Instantiate without using the pool allocator instead of 
+            // Instantiate without using the pool allocator instead of
             GameObject *obj = (GameObject *)OUtils::reflectiontable[gobj.type]->create(false);
             obj->scene = this;
             obj->position = gobj.position;
@@ -30,6 +30,7 @@ namespace OScene {
             obj->scale = gobj.scale;
             obj->parent = SCENE_INVALIDHANDLE;
             obj->sparent = gobj.parent;
+            obj->bounds = OMath::AABB(gobj.min, gobj.max);
             if (gobj.numchildren) {
                 obj->schildren.reserve(gobj.numchildren);
                 ASSERT(fread(obj->schildren.data(), sizeof(size_t) * gobj.numchildren, 1, f), "Failed to read game object children.\n");
@@ -40,6 +41,7 @@ namespace OScene {
             idptrmap[gobj.id] = obj;
             if (gobj.datasize) {
                 uint8_t *data = (uint8_t *)malloc(gobj.datasize);
+                ASSERT(data != NULL, "Failed to allocate memory for object serialised data.\n");
                 ASSERT(fread(data, gobj.datasize, 1, f), "Failed to read serialised game object data.\n");
                 OResource::Serialiser serialiser = OResource::Serialiser(data, gobj.datasize);
                 obj->deserialise(&serialiser);
@@ -58,18 +60,19 @@ namespace OScene {
         for (size_t i = 0; i < numobjects; i++) {
             OUtils::Handle<GameObject> obj = this->objects[i];
             if (obj->sparent) {
-                ASSERT(idptrmap.find(obj->sparent) != idptrmap.end(), "Unresolved parent ID (%u) for object.\n", obj->sparent);
+                ASSERT(idptrmap.find(obj->sparent) != idptrmap.end(), "Unresolved parent ID (%lu) for object.\n", obj->sparent);
                 obj->parent = idptrmap[obj->sparent]->gethandle();
                 obj->sparent = 0;
             }
 
             if (obj->schildren.size()) {
                 for (auto it = obj->schildren.begin(); it != obj->schildren.end(); it++) {
-                    ASSERT(idptrmap.find(*it) != idptrmap.end(), "Unresolved child ID (%u) for object.\n", *it);
+                    ASSERT(idptrmap.find(*it) != idptrmap.end(), "Unresolved child ID (%lu) for object.\n", *it);
                     obj->children.push_back(idptrmap[*it]->gethandle());
                 }
                 obj->schildren.clear();
             }
+            this->partitionmanager.add(obj);
         }
     }
 
@@ -85,6 +88,8 @@ namespace OScene {
         gobj.flags = obj->flags;
         gobj.type = obj->type;
         gobj.id = obj->id;
+        gobj.min = obj->bounds.min;
+        gobj.max = obj->bounds.max;
         gobj.parent = obj->parent.isvalid() ? obj->parent->id : 0;
         gobj.numchildren = obj->children.size();
 
@@ -113,7 +118,7 @@ namespace OScene {
         ASSERT(fwrite(&header, sizeof(struct scenehdr), 1, f), "Failed to write scene header.\n");
 
         for (auto it = this->objects.begin(); it != this->objects.end(); it++) {
-            saveobj(f, *it); 
+            saveobj(f, *it);
         }
 
         fclose(f);

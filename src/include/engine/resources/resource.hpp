@@ -9,7 +9,34 @@
 #include <engine/utils/pointers.hpp>
 
 namespace OResource {
+    class Resource;
+
+#define RESOURCE_INVALIDHANDLE OUtils::Handle<OResource::Resource>(NULL, SIZE_MAX, SIZE_MAX)
+
+    class ResourceManager {
+        public:
+            OJob::Mutex mutex; // We expect little contention but long waits on resources.
+
+            // map hash of path to resources
+            std::unordered_map<uint32_t, Resource *> resources;
+            OUtils::ResolutionTable table = OUtils::ResolutionTable(8192);
+            std::atomic<size_t> idcounter = 1;
+
+            // load from RPak
+            void loadrpak(RPak *rpak);
+            void create(const char *path);
+            void create(const char *path, void *src);
+
+            OUtils::Handle<Resource> get(const char *path);
+    };
+
+    extern ResourceManager manager;
+
+    // XXX: Rework resource system:
+    // We actually care about *loading* stuff rather than just knowing where things are.
     class Resource {
+        private:
+            size_t handle = 0; // handle index for speedy creation of handles
         public:
             enum srctype {
                 SOURCE_RPAK, // from an RPak
@@ -17,42 +44,67 @@ namespace OResource {
                 SOURCE_OSFS // operating system's filesystem
             };
 
+            OJob::Mutex mutex; // only one thread may "own" the resource at any one time. use mutex here instead of spinlock as we can expect long busy-waits if we were to use a spinlock instead.
+
             enum srctype type;
             RPak *rpak; // RPak
             struct RPak::tableentry rpakentry; // RPak entry header
             void *ptr; // virtual is a pointer to whatever source
             const char *path; // path to file (either os filesystem or RPak)
-            Resource() { }
+            size_t id; // unique resource ID.
+
+            Resource() {
+                this->handle = manager.table.bind(this);
+                this->id = manager.idcounter.fetch_add(1);
+            }
             Resource(RPak *rpak, const char *path) {
                 this->rpak = rpak;
                 this->path = path;
                 this->type = SOURCE_RPAK;
+                this->handle = manager.table.bind(this);
+                this->id = manager.idcounter.fetch_add(1);
             }
             Resource(const char *path) {
                 this->path = path;
                 this->type = SOURCE_OSFS;
+                this->handle = manager.table.bind(this);
+                this->id = manager.idcounter.fetch_add(1);
             }
             Resource(const char *path, void *src) {
                 this->path = path;
                 this->ptr = src;
-                this->type = SOURCE_OSFS;
+                this->type = SOURCE_VIRTUAL;
+                this->handle = manager.table.bind(this);
+                this->id = manager.idcounter.fetch_add(1);
+            }
+
+            // Claim exclusive access on active worker/thread.
+            void claim(void) {
+                this->mutex.lock();
+            }
+
+            // Release exclusive access on active worker/thread.
+            void release(void) {
+                this->mutex.unlock();
+            }
+
+            // Reinterpret resource as that of one pointing to a virtual resource of whatever type.
+            template <typename T>
+            T *as(void) {
+                return (T *)this->ptr;
+            }
+
+            OUtils::Handle<Resource> gethandle(void) {
+                return OUtils::Handle<Resource>(&manager.table, this->handle, this->id);
             }
     };
 
-    class ResourceManager {
-        public:
-            // map hash of path to resources
-            std::unordered_map<uint32_t, Resource *> resources;
-
-            // load from RPak
-            void loadrpak(RPak *rpak);
-            void create(const char *path);
-            void create(const char *path, void *src);
-
-            Resource *get(const char *path);
-    };
-
-    extern ResourceManager manager;
+    // Guarantee ownership and access to a resource.
+#define RESOURCE_GUARANTEE(RESOURCE, ...) \
+    ASSERT((RESOURCE).isvalid(), "Invalid resource handle passed to guarantee macro.\n"); \
+    (RESOURCE)->claim(); \
+    __VA_ARGS__ \
+    (RESOURCE)->release();
 
 }
 

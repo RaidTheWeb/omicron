@@ -14,7 +14,7 @@ namespace ORenderer {
         return 0;
     }
 
-    RendererContext *context;
+    RendererContext *context = NULL;
 
     RendererContext *createcontext(void) {
 #if defined(OMICRON_RENDERVULKAN)

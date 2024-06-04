@@ -10,10 +10,6 @@ namespace OScene {
     // https://www.beosil.com/download/CollisionDetectionHashing_VMV03.pdf
     // Proposes a grid cell system for collision detection, however, we can use this grid cell system for culling and apply it to many use cases
 
-    class CullingFrustum {
-
-    };
-
     class CellDescriptor {
         public:
             glm::ivec3 pos;
@@ -36,7 +32,7 @@ namespace OScene {
                 // Large prime numbers let us hash these values properly
                 return (uint32_t)cell.x * 73856093 + (uint32_t)cell.y * 19349663 + (uint32_t)cell.z * 83492791;
             }
-    };  
+    };
 
     // 4096 byte aligned cells (so they may fit into a page allocator)
     // NOTE: Multiple of these can be assigned to a single cell position (hence the prev and next members) so that we can exceed the arbitary limit imposed by 4096 byte alignment
@@ -50,13 +46,14 @@ namespace OScene {
                 glm::ivec3 cellpos; // cell position in grid (for searching)
                 uint32_t count; // number of objects in this cell
                 size_t id; // unique ID given on cell creation
+                size_t idx; // index in cell list
                 bool big; // Contains an object whose bounds exceeds the cell
             };
 
             struct header header;
-    
+
             static const uint32_t COUNT = (4096 - sizeof(header)) / sizeof(OUtils::Handle<GameObject>);
-    
+
             OUtils::Handle<GameObject> objects[COUNT];
     } __attribute__((aligned(4096)));
 
@@ -71,7 +68,7 @@ namespace OScene {
 
             struct header header;
             static const uint32_t COUNT = (4096 - sizeof(header)) / (sizeof(OUtils::Handle<GameObject>));
-            OUtils::Handle<GameObject> objects[COUNT]; 
+            OUtils::Handle<GameObject> objects[COUNT];
     } __attribute__((aligned(4096)));
 
     class CullResultList {
@@ -79,6 +76,9 @@ namespace OScene {
             OUtils::PoolAllocator *allocator = NULL;
             CullResult *begin = NULL;
             CullResult *end = NULL;
+            // OJob::Mutex mutex;
+            OJob::Spinlock spin;
+            uint64_t previous = 0;
 
             CullResultList(OUtils::PoolAllocator *allocator) {
                 this->allocator = allocator;
@@ -96,6 +96,7 @@ namespace OScene {
             // Detach results list from this handler.
             CullResult *detach(void) {
                 CullResult *tmp = this->begin;
+                this->previous = 0;
                 this->begin = NULL;
                 this->end = NULL;
                 return tmp;
@@ -103,6 +104,9 @@ namespace OScene {
 
             // Acquire a new element for the list.
             CullResult *acquire(void) {
+                // this->mutex.lock();
+                OJob::ScopedSpinlock spin(&this->spin);
+
                 CullResult *res = (CullResult *)this->allocator->alloc();
                 memset(res, 0, sizeof(CullResult));
                 if (this->begin == NULL) { // List is empty, initialise it.
@@ -113,6 +117,9 @@ namespace OScene {
                     res->header.next = NULL;
                     this->end = res; // Set this allocation as the new end of the list
                 }
+                ASSERT((uint64_t)res != previous, "Reallocating the same pointer with %p.\n", res);
+                previous = (uint64_t)res;
+                // this->mutex.unlock();
                 return res;
             }
     };
@@ -127,16 +134,24 @@ namespace OScene {
 
     class ParitionManager {
         public:
+            struct work {
+                std::atomic<size_t> *idx; // Reference to the index atomic.
+                CullResultList *list; // Reference to the result list.
+                OMath::Frustum *frustum; // Reference to the camera frustum.
+                ParitionManager *manager; // Reference to the partition manager this work is for.
+            };
+
             std::unordered_map<glm::ivec3, Cell *, CellDescHasher> map;
-            OUtils::PoolAllocator allocator = OUtils::PoolAllocator(4096, 4096, 256); // Generic page allocator (16MB)
+            std::vector<Cell *> cells;
+            OUtils::PoolAllocator allocator = OUtils::PoolAllocator(4096, 4096, 256, "Dynamic World Partition Culling"); // Generic page allocator (16MB)
             CellDescHasher hasher;
             std::atomic<size_t> idcounter = 1; // Start at one so a zeroed out cell can never be valid
-            
-            // Create this only once as a constant so we can have fast runtime comparisons 
+
+            // Create this only once as a constant so we can have fast runtime comparisons
             const OUtils::Handle<GameObject> INVALIDHANDLE = OUtils::Handle<GameObject>(NULL, SIZE_MAX, SIZE_MAX);
 
             size_t getfreespot(Cell *cell) {
-                // O(N) time complexity, unfortunate but there is no immediate solution I can think of to produce the same result. (Perhaps do what we do for the old resolution table and hash the game object to get a potential spot quicker?)  
+                // O(N) time complexity, unfortunate but there is no immediate solution I can think of to produce the same result. (Perhaps do what we do for the old resolution table and hash the game object to get a potential spot quicker?)
                 for (size_t i = 0; i < cell->COUNT; i++) {
                     if (cell->objects[i] == INVALIDHANDLE) { // We don't use isvalid() here because it's actually faster to do a comparison when we know that this slot will be invalidated automatically when a game object is deleted (and thus, isvalid() would only really waste extra cycles on checking the handle)
                         return i; // Free slot here
@@ -162,7 +177,7 @@ namespace OScene {
                 }
             }
 
-            void docull(Cell *cell, ORenderer::PerspectiveCamera &camera, CullResult **ret, CullResultList *list);
+            void docull(Cell *cell, OMath::Frustum *frustum, CullResult **ret, CullResultList *list);
             CullResult *cull(ORenderer::PerspectiveCamera &camera);
     };
 }

@@ -9,7 +9,7 @@ class PBRPipeline : public GraphicsPipeline {
         void init(void);
         void resize(struct ORenderer::rect rendersize);
         void update(uint64_t flags);
-        void execute(ORenderer::Stream *stream);
+        void execute(ORenderer::Stream *stream, void *camera);
 };
 
 class PBRPrimitivePass : public GraphicsPipelinePass {

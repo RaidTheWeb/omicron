@@ -77,14 +77,14 @@ namespace ORenderer {
             uint8_t type;
             void *code;
             size_t size;
-            
+
             Shader(void) {
 
             }
 
-            Shader(const char *path, uint8_t type) { 
+            Shader(const char *path, uint8_t type) {
                 ASSERT(path != NULL, "Attempted to load shader with NULL path.\n");
-                OResource::Resource *res = OResource::manager.get(path);
+                OUtils::Handle<OResource::Resource> res = OResource::manager.get(path);
                 if (res->type == OResource::Resource::SOURCE_OSFS) {
                     FILE *f = fopen(path, "r");
                     ASSERT(f != NULL, "Failed to load shader '%s'.\n", path);
@@ -808,38 +808,191 @@ namespace ORenderer {
 
             // Create a texture.
             virtual uint8_t createtexture(struct texturedesc *desc, struct texture *texture) { return RESULT_SUCCESS; }
+            uint8_t createtexture(struct texture *texture, uint8_t type, uint32_t width, uint32_t height, uint32_t depth, uint32_t mips, uint32_t layers, uint8_t format, uint8_t memlayout, size_t usage, uint8_t samples) {
+                struct texturedesc desc = (struct texturedesc) {
+                    .type = type,
+                    .width = width,
+                    .height = height,
+                    .depth = depth,
+                    .mips = mips,
+                    .layers = layers,
+                    .format = format,
+                    .memlayout = memlayout,
+                    .usage = usage,
+                    .samples = samples
+                };
+                return this->createtexture(&desc, texture);
+            }
 
             // Create a texture view.
             virtual uint8_t createtextureview(struct textureviewdesc *desc, struct textureview *view) { return RESULT_SUCCESS; }
+            uint8_t createtextureview(struct textureview *view, uint8_t format, struct texture texture, uint8_t type, size_t aspect, uint32_t basemiplevel, uint32_t mipcount, uint32_t baselayer, uint32_t layercount) {
+                struct textureviewdesc desc = (struct textureviewdesc) {
+                    .format = format,
+                    .texture = texture,
+                    .type = type,
+                    .aspect = aspect,
+                    .basemiplevel = basemiplevel,
+                    .mipcount = mipcount,
+                    .baselayer = baselayer,
+                    .layercount = layercount
+                };
+                return this->createtextureview(&desc, view);
+            }
 
             // Create a buffer of any type.
             virtual uint8_t createbuffer(struct bufferdesc *desc, struct buffer *buffer) { return RESULT_SUCCESS; }
+            uint8_t createbuffer(struct buffer *buffer, size_t size, size_t usage, size_t memprops, size_t flags) {
+                struct bufferdesc desc = (struct bufferdesc) {
+                    .size = size,
+                    .usage = usage,
+                    .memprops = memprops,
+                    .flags = flags
+                };
+                return this->createbuffer(&desc, buffer);
+            }
 
             // Create a framebuffer.
             virtual uint8_t createframebuffer(struct framebufferdesc *desc, struct framebuffer *framebuffer) { return RESULT_SUCCESS; }
+            uint8_t createframebuffer(struct framebuffer *framebuffer, size_t attachmentcount, struct textureview *attachments, uint32_t width, uint32_t height, uint32_t layers, struct renderpass pass) {
+                struct framebufferdesc desc = (struct framebufferdesc) {
+                    .attachmentcount = attachmentcount,
+                    .attachments = attachments,
+                    .width = width,
+                    .height = height,
+                    .layers = layers,
+                    .pass = pass
+                };
+                return this->createframebuffer(&desc, framebuffer);
+
+            }
 
             // Create a renderpass.
             virtual uint8_t createrenderpass(struct renderpassdesc *desc, struct renderpass *pass) { return RESULT_SUCCESS; }
+            uint8_t createrenderpass(struct renderpass *pass, size_t attachmentcount, struct rtattachmentdesc *attachments, size_t colourrefcount, struct rtattachmentrefdesc *colourrefs, struct rtattachmentrefdesc *depthref) {
+                struct renderpassdesc desc = (struct renderpassdesc) {
+                    .attachmentcount = attachmentcount,
+                    .attachments = attachments,
+                    .colourrefcount = colourrefcount,
+                    .colourrefs = colourrefs,
+                    .depthref = depthref
+                };
+                return this->createrenderpass(&desc, pass);
+            }
 
             // Create a graphics pipeline state.
             virtual uint8_t createpipelinestate(struct pipelinestatedesc *desc, struct pipelinestate *state) { return RESULT_SUCCESS; }
+            uint8_t createpipelinestate(
+                struct pipelinestate *state, uint8_t primtopology,
+                size_t tesspoints, size_t scissorcount,
+                size_t viewportcount, size_t resourcecount,
+                size_t stagecount, struct vtxinputdesc *vtxinput,
+                struct rasteriserdesc *rasteriser, struct multisampledesc *multisample,
+                struct blendstatedesc *blendstate, struct depthstencilstatedesc *depthstencil,
+                struct pipelinestateresourcedesc *resources, struct renderpass *renderpass,
+                Shader *stages) {
+                struct pipelinestatedesc desc = (struct pipelinestatedesc) {
+                    .primtopology = primtopology,
+                    .tesspoints = tesspoints,
+                    .scissorcount = scissorcount,
+                    .viewportcount = viewportcount,
+                    .resourcecount = resourcecount,
+                    .stagecount = stagecount,
+                    .vtxinput = vtxinput,
+                    .rasteriser = rasteriser,
+                    .multisample = multisample,
+                    .blendstate = blendstate,
+                    .depthstencil = depthstencil,
+                    .resources = resources,
+                    .renderpass = renderpass,
+                    .stages = stages
+                };
+                return this->createpipelinestate(&desc, state);
+            }
 
             // Create a compute pipeline state.
             virtual uint8_t createcomputepipelinestate(struct computepipelinestatedesc *desc, struct pipelinestate *state) { return RESULT_SUCCESS; }
+            uint8_t createcomputepipelinestate(struct pipelinestate *state, size_t resourcecount, struct pipelinestateresourcedesc *resources, Shader stage) {
+                struct computepipelinestatedesc desc = (struct computepipelinestatedesc) {
+                    .resourcecount = resourcecount,
+                    .resources = resources,
+                    .stage = stage
+                };
+                return this->createcomputepipelinestate(&desc, state);
+            }
 
             // Create a sampler.
             virtual uint8_t createsampler(struct samplerdesc *desc, struct sampler *sampler) { return RESULT_SUCCESS; }
+            uint8_t createsampler(
+                struct sampler *sampler, size_t magfilter,
+                size_t minfilter, size_t mipmode,
+                size_t addru, size_t addrv, size_t addrw,
+                float lodbias, bool anisotropyenable, float maxanisotropy,
+                bool cmpenable, size_t cmpop, float minlod, float maxlod,
+                bool unnormalisedcoords) {
+                struct samplerdesc desc = (struct samplerdesc) {
+                    .magfilter = magfilter,
+                    .minfilter = minfilter,
+                    .mipmode = mipmode,
+                    .addru = addru,
+                    .addrv = addrv,
+                    .addrw = addrw,
+                    .lodbias = lodbias,
+                    .anisotropyenable = anisotropyenable,
+                    .maxanisotropy = maxanisotropy,
+                    .cmpenable = cmpenable,
+                    .cmpop = cmpop,
+                    .minlod = minlod,
+                    .maxlod = maxlod,
+                    .unnormalisedcoords = unnormalisedcoords
+                };
+                return this->createsampler(&desc, sampler);
+            }
+            uint8_t createsampler(
+                struct sampler *sampler, size_t magfilter,
+                size_t minfilter, size_t mipmode, size_t addru,
+                size_t addrv, size_t addrw, float lodbias,
+                bool anisotropyenable, float maxanisotropy) {
+                return this->createsampler(sampler, magfilter, minfilter, mipmode, addru, addrv, addrw, lodbias, anisotropyenable, maxanisotropy, false, CMPOP_NEVER, 0.0f, 0.0f, false);
+            }
+            uint8_t createsampler(
+                struct sampler *sampler, size_t filter,
+                size_t mipmode, size_t addr, float lodbias,
+                bool anisotropyenable, float maxanisotropy) {
+                return this->createsampler(sampler, filter, filter, mipmode, addr, addr, addr, lodbias, anisotropyenable, maxanisotropy);
+            }
 
             // XXX: Think real hard about everything, how do I want to go about it?
             // Probably anything synchronous (on demand and not related to a command "stream") should be put here as we want our changes to be reflected immediately rather than have them appear at a later date.
             // Map a buffer's memory ranges to CPU-addressable memory.
             virtual uint8_t mapbuffer(struct buffermapdesc *desc, struct buffermap *map) { return RESULT_SUCCESS; }
+            uint8_t mapbuffer(struct buffermap *map, struct buffer buffer, size_t offset, size_t size) {
+                struct buffermapdesc desc = (struct buffermapdesc) {
+                    .buffer = buffer,
+                    .offset = offset,
+                    .size = size
+                };
+                return this->mapbuffer(&desc, map);
+            }
+
             // Unmap a memory map.
             virtual uint8_t unmapbuffer(struct buffermap map) { return RESULT_SUCCESS; }
             // Get the current renderer latency frame.
             virtual uint8_t getlatency(void) { return 0; }
+
             // Copy data between two buffers.
             virtual uint8_t copybuffer(struct buffercopydesc *desc) { return RESULT_SUCCESS; }
+            uint8_t copybuffer(struct buffer src, struct buffer dst, size_t srcoffset, size_t dstoffset, size_t size) {
+                struct buffercopydesc desc = (struct buffercopydesc) {
+                    .src = src,
+                    .dst = dst,
+                    .srcoffset = srcoffset,
+                    .dstoffset = dstoffset,
+                    .size = size
+                };
+                return this->copybuffer(&desc);
+            }
+
             // Create the renderer backbuffer(s).
             virtual uint8_t createbackbuffer(struct renderpass pass, struct ORenderer::textureview *depth = NULL) { return RESULT_SUCCESS; }
             // Request a reference to the backbuffer of the current frame.
@@ -851,6 +1004,8 @@ namespace ORenderer {
             virtual uint8_t requestscratchbuffer(ScratchBuffer **scratchbuffer) { return RESULT_SUCCESS; };
             // Transition texture between image layouts.
             virtual uint8_t transitionlayout(struct texture texture, size_t format, size_t state) { return RESULT_SUCCESS; }
+
+            virtual ORenderer::Stream *getimmediate(void) { return NULL; };
 
             // submitting a stream will have it executed on GPU ASAP.
             // not to be used in the pipeline for the primary stream.
@@ -904,7 +1059,7 @@ namespace ORenderer {
                 this->alignment = alignment;
                 this->ctx = ctx;
                 const size_t entsize = utils_stridealignment(size, this->alignment);
-        
+
                 struct ORenderer::bufferdesc desc = { };
                 desc.size = entsize * count;
                 desc.usage = ORenderer::BUFFER_UNIFORM;
@@ -923,9 +1078,10 @@ namespace ORenderer {
             }
 
             size_t write(const void *data, size_t size) {
+                ZoneScopedN("Scratchbuffer Write");
                 ASSERT(this->pos + size < this->size, "Not enough space for scratchbuffer write of %lu bytes.\n", size);
                 size_t off = this->pos;
-                
+
                 memcpy(&((uint8_t *)this->map.mapped[0])[this->pos], data, size);
 
                 this->pos += utils_stridealignment(size, this->alignment);
@@ -934,6 +1090,7 @@ namespace ORenderer {
             }
 
             void flush(void) {
+                ZoneScopedN("Scratchbuffer Flush");
                 const size_t size = glm::min((size_t)utils_stridealignment(this->pos, this->alignment), this->size);
                 this->ctx->flushrange(this->buffer, size);
             }
@@ -979,8 +1136,8 @@ namespace ORenderer {
             struct bufferbind bufferbind;
             struct sampledbind sampledbind;
         };
-    }; 
-    
+    };
+
     struct streamnibble {
         size_t type;
         union {
@@ -1059,7 +1216,7 @@ namespace ORenderer {
             } zonebegin;
             size_t zoneend;
         };
-    }; 
+    };
 
     // Stream system that allows render commands to be submitted by any number of jobs and have them be executed with concurrent safety in a render context later.
     class Stream {
@@ -1069,7 +1226,7 @@ namespace ORenderer {
             // these few variables after this are cleared every frame
             std::vector<struct streamnibble> cmd;
             // we keep some temporary memory per-frame in order to allow us to offer persistence to data instead of letting it go out of scope, used for anything pointer related (eg. copy to temporary buffer and free later)
-            OUtils::StackAllocator tempmem = OUtils::StackAllocator(16384); // a stack allocator is suitable for our purposes as we can allocate or free from a preallocated block of memory to reduce the overhead from malloc() and free() (makes a big difference as it adds up)
+            OUtils::StackAllocator tempmem = OUtils::StackAllocator(16384 * 4); // a stack allocator is suitable for our purposes as we can allocate or free from a preallocated block of memory to reduce the overhead from malloc() and free() (makes a big difference as it adds up)
             // temporary storage for descriptor mappings per pipeline state
             std::vector<struct pipelinestateresourcemap> mappings;
             // temporary reference to the active pipeline state
@@ -1093,7 +1250,7 @@ namespace ORenderer {
                 OP_DEBUGZONEBEGIN,
                 OP_DEBUGZONEEND
             };
-           
+
             // Lock the stream to protect against out-of-order command submission (not strictly needed, but useful to prevent race conditions).
             void claim(void) {
                 this->mutex.lock();
@@ -1107,201 +1264,222 @@ namespace ORenderer {
             }
 
             // Flush stream command list and clear all temporary memory.
-            void flushcmd(void) {
-                this->cmd.clear();
-                this->tempmem.clear();
-                this->mappings.clear();
+            virtual void flushcmd(void) {
+                // this->cmd.clear();
+                // this->tempmem.clear();
+                // this->mappings.clear();
             }
+
+            virtual void setviewport(struct viewport viewport) { }
 
             // Set viewport for renderering.
-            void setviewport(struct viewport viewport) {
+            // void setviewport(struct viewport viewport) {
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_SETVIEWPORT, .viewport = viewport });
+                // this->cmd.push_back((struct streamnibble) { .type = OP_SETVIEWPORT, .viewport = viewport });
                 // this->mutex.unlock();
-            }
+            // }
 
             // Set scissor for renderering
-            void setscissor(struct rect rect) {
+            virtual void setscissor(struct rect rect) {
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_SETSCISSOR, .scissor = rect });
+                // this->cmd.push_back((struct streamnibble) { .type = OP_SETSCISSOR, .scissor = rect });
                 // this->mutex.unlock();
             }
 
             // Begin a renderpass for a framebuffer with renderering area and clear colours.
-            void beginrenderpass(struct renderpass renderpass, struct framebuffer framebuffer, struct rect area, struct clearcolourdesc clear) {
+            virtual void beginrenderpass(struct renderpass renderpass, struct framebuffer framebuffer, struct rect area, struct clearcolourdesc clear) {
+                // ZoneScoped;
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_BEGINRENDERPASS, .renderpass = {
-                    .rpass = renderpass,
-                    .fb = framebuffer,
-                    .area = area,
-                    .clear = clear
-                } });
+                // this->cmd.push_back((struct streamnibble) { .type = OP_BEGINRENDERPASS, .renderpass = {
+                    // .rpass = renderpass,
+                    // .fb = framebuffer,
+                    // .area = area,
+                    // .clear = clear
+                // } });
                 // this->mutex.unlock();
             }
 
             // End a renderpass.
-            void endrenderpass(void) {
+            virtual void endrenderpass(void) {
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_ENDRENDERPASS });
+                // this->cmd.push_back((struct streamnibble) { .type = OP_ENDRENDERPASS });
                 // this->mutex.unlock();
             }
 
             // Set the current pipeline state.
-            void setpipelinestate(struct pipelinestate pipeline) {
+            virtual void setpipelinestate(struct pipelinestate pipeline) {
+                // ZoneScoped;
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_SETPIPELINESTATE, .pipeline = pipeline });
+                // this->cmd.push_back((struct streamnibble) { .type = OP_SETPIPELINESTATE, .pipeline = pipeline });
                 // this->mutex.unlock();
             }
 
             // Set the current index buffer for use before a draw call.
-            void setidxbuffer(struct buffer buffer, size_t offset, bool index32) {
+            virtual void setidxbuffer(struct buffer buffer, size_t offset, bool index32) {
+                // ZoneScoped;
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_SETIDXBUFFER, .idxbuffer = {
-                    .buffer = buffer,
-                    .offset = offset,
-                    .index32 = false,
-                } });
+                // this->cmd.push_back((struct streamnibble) { .type = OP_SETIDXBUFFER, .idxbuffer = {
+                    // .buffer = buffer,
+                    // .offset = offset,
+                    // .index32 = false,
+                // } });
                 // this->mutex.unlock();
             }
 
             // Set the current vertex buffers for use before a draw call.
-            void setvtxbuffers(struct buffer *buffers, size_t *offsets, size_t firstbind, size_t bindcount) {
-                ASSERT(bindcount <= 4, "Too many vertex buffers submitted to stream at once.\n");
+            virtual void setvtxbuffers(struct buffer *buffers, size_t *offsets, size_t firstbind, size_t bindcount) {
+                // ZoneScoped;
+                // ASSERT(bindcount <= 4, "Too many vertex buffers submitted to stream at once.\n");
                 // this->mutex.lock();
-                struct streamnibble nibble = (struct streamnibble) { .type = OP_SETVTXBUFFERS, .vtxbuffers = {
-                    .buffers = { },
-                    .offsets = { },
-                    .firstbind = firstbind,
-                    .bindcount = bindcount
-                } };
-                for (size_t i = 0; i < bindcount; i++) {
-                    nibble.vtxbuffers.buffers[i] = buffers[i];
-                    nibble.vtxbuffers.offsets[i] = offsets[i];
-                }
+                // struct streamnibble nibble = (struct streamnibble) { .type = OP_SETVTXBUFFERS, .vtxbuffers = {
+                    // .buffers = { },
+                    // .offsets = { },
+                    // .firstbind = firstbind,
+                    // .bindcount = bindcount
+                // } };
+                // for (size_t i = 0; i < bindcount; i++) {
+                    // nibble.vtxbuffers.buffers[i] = buffers[i];
+                    // nibble.vtxbuffers.offsets[i] = offsets[i];
+                // }
 
-                this->cmd.push_back(nibble);
+                // this->cmd.push_back(nibble);
                 // this->mutex.unlock();
             }
 
-            void setvtxbuffer(struct buffer buffer, size_t offset) {
+            virtual void setvtxbuffer(struct buffer buffer, size_t offset) {
+                // ZoneScoped;
                 // this->mutex.lock();
-                struct streamnibble nibble = (struct streamnibble) { .type = OP_SETVTXBUFFERS, .vtxbuffers = {
-                    .buffers = { buffer },
-                    .offsets = { offset },
-                    .firstbind = 0,
-                    .bindcount = 1
-                } };
+                // struct streamnibble nibble = (struct streamnibble) { .type = OP_SETVTXBUFFERS, .vtxbuffers = {
+                    // .buffers = { buffer },
+                    // .offsets = { offset },
+                    // .firstbind = 0,
+                    // .bindcount = 1
+                // } };
 
-                this->cmd.push_back(nibble);
+                // this->cmd.push_back(nibble);
                 // this->mutex.unlock();
             }
 
             // Draw unindexed vertices.
-            void draw(size_t vtxcount, size_t instancecount, size_t firstvtx, size_t firstinstance) {
+            virtual void draw(size_t vtxcount, size_t instancecount, size_t firstvtx, size_t firstinstance) {
+                // ZoneScoped;
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_DRAW, .draw = {
-                    .vtxcount = vtxcount,
-                    .instancecount = instancecount,
-                    .firstvtx = firstvtx,
-                    .firstinstance = firstinstance
-                } });
+                // this->cmd.push_back((struct streamnibble) { .type = OP_DRAW, .draw = {
+                //     .vtxcount = vtxcount,
+                //     .instancecount = instancecount,
+                //     .firstvtx = firstvtx,
+                //     .firstinstance = firstinstance
+                // } });
                 // this->mutex.unlock();
             }
 
             // Draw indexed vertices.
-            void drawindexed(size_t idxcount, size_t instancecount, size_t firstidx, size_t vtxoffset, size_t firstinstance) {
+            virtual void drawindexed(size_t idxcount, size_t instancecount, size_t firstidx, size_t vtxoffset, size_t firstinstance) {
+                // ZoneScoped;
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_DRAWINDEXED, .drawindexed = {
-                    .idxcount = idxcount,
-                    .instancecount = instancecount,
-                    .firstidx = firstidx,
-                    .vtxoffset = vtxoffset,
-                    .firstinstance = firstinstance
-                } });
+                // this->cmd.push_back((struct streamnibble) { .type = OP_DRAWINDEXED, .drawindexed = {
+                //     .idxcount = idxcount,
+                //     .instancecount = instancecount,
+                //     .firstidx = firstidx,
+                //     .vtxoffset = vtxoffset,
+                //     .firstinstance = firstinstance
+                // } });
                 // this->mutex.unlock();
             }
 
             // Commit currently set pipeline resources.
-            void commitresources(void) {
+            virtual void commitresources(void) {
+                // ZoneScoped;
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_COMMITRESOURCES });
+                // this->cmd.push_back((struct streamnibble) { .type = OP_COMMITRESOURCES });
                 // this->mutex.unlock();
             }
 
             // Bind a pipeline resource to a binding.
-            void bindresource(size_t binding, struct bufferbind bind, size_t type) {
+            virtual void bindresource(size_t binding, struct bufferbind bind, size_t type) {
+                // ZoneScoped;
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_BINDRESOURCE, .resource = { .binding = binding, .type = type, .bufferbind = bind } });
+                // this->cmd.push_back((struct streamnibble) { .type = OP_BINDRESOURCE, .resource = { .binding = binding, .type = type, .bufferbind = bind } });
                 // this->mutex.unlock();
             }
 
-            void bindresource(size_t binding, struct sampledbind bind, size_t type) {
+            virtual void bindresource(size_t binding, struct sampledbind bind, size_t type) {
+                // ZoneScoped;
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_BINDRESOURCE, .resource = { .binding = binding, .type = type, .sampledbind = bind } });
+                // this->cmd.push_back((struct streamnibble) { .type = OP_BINDRESOURCE, .resource = { .binding = binding, .type = type, .sampledbind = bind } });
                 // this->mutex.unlock();
             }
 
             // Transition a texture between layouts.
-            void transitionlayout(struct texture texture, size_t format, size_t state) {
+            virtual void transitionlayout(struct texture texture, size_t format, size_t state) {
+                // ZoneScoped;
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_TRANSITIONLAYOUT, .layout = {
-                    .texture = texture, .format = format, .state = state
-                } });
+                // this->cmd.push_back((struct streamnibble) { .type = OP_TRANSITIONLAYOUT, .layout = {
+                    // .texture = texture, .format = format, .state = state
+                // } });
                 // this->mutex.unlock();
             }
 
-            void copybufferimage(struct bufferimagecopy region, struct buffer buffer, struct texture texture) {
+            virtual void copybufferimage(struct bufferimagecopy region, struct buffer buffer, struct texture texture) {
+                // ZoneScoped;
                 // this->mutex.lock();
-                this->cmd.push_back((struct streamnibble) { .type = OP_COPYBUFFERIMAGE, .copybufferimage =  {
-                    .region = region, .buffer = buffer, .texture = texture
-                } });
+                // this->cmd.push_back((struct streamnibble) { .type = OP_COPYBUFFERIMAGE, .copybufferimage =  {
+                    // .region = region, .buffer = buffer, .texture = texture
+                // } });
                 // this->mutex.unlock();
             }
 
             // Submit another stream's command list to the current command list (the result will be as if the commands were submitted to this current stream)
-            void submitstream(Stream *stream) {
+            virtual void submitstream(Stream *stream) {
+                // ZoneScoped;
                 // this->mutex.lock();
                 // stream->mutex.lock();
-                stream->claim();
-                for (auto it = stream->cmd.begin(); it != stream->cmd.end(); it++) {
-                    if (it->type == OP_DEBUGZONEBEGIN) {
-                        this->zonebegin(it->zonebegin.name);
-                    } else {
-                       this->cmd.push_back(*it);
-                    }
-                }
-
-                stream->release();
+                // stream->claim();
+                // for (auto it = stream->cmd.begin(); it != stream->cmd.end(); it++) {
+                //     if (it->type == OP_DEBUGZONEBEGIN) {
+                //         this->zonebegin(it->zonebegin.name);
+                //     } else {
+                //        this->cmd.push_back(*it);
+                //     }
+                // }
+                //
+                // stream->release();
                 // stream->mutex.unlock();
                 // this->mutex.unlock();
             }
 
-            void stagedmemcopy(void *dst, void *src, size_t size) {
-                void *srccpy = this->tempmem.alloc(size);
-                memcpy(srccpy, src, size);
-                this->cmd.push_back((struct streamnibble) { .type = OP_STAGEDMEMCOPY, .stagedmemcopy = {
-                    .dst = dst,
-                    .src = srccpy,
-                    .size = size
-                } });
+            virtual void stagedmemcopy(void *dst, void *src, size_t size) {
+                // ZoneScoped;
+                // void *srccpy = this->tempmem.alloc(size);
+                // memcpy(srccpy, src, size);
+                // this->cmd.push_back((struct streamnibble) { .type = OP_STAGEDMEMCOPY, .stagedmemcopy = {
+                //     .dst = dst,
+                //     .src = srccpy,
+                //     .size = size
+                // } });
             }
 
             size_t zonebegin(const char *name) {
-                size_t len = strnlen(name, 63);
-                char *tmp = (char *)this->tempmem.alloc(len + 1); // Hard limit here to prevent a pipeline zone name from consuming all of the stack memory.
-                memset(tmp, 0, len + 1);
-                strncpy(tmp, name, len);
-                size_t index = this->cmd.size();
-                this->cmd.push_back((struct streamnibble) { .type = OP_DEBUGZONEBEGIN, .zonebegin = {
-                    .name = tmp,
-                    .zone = NULL
-                } });
-                return index;
+                // ZoneScoped;
+                // size_t len = strnlen(name, 63);
+                // char *tmp = (char *)this->tempmem.alloc(len + 1); // Hard limit here to prevent a pipeline zone name from consuming all of the stack memory.
+                // memset(tmp, 0, len + 1);
+                // strncpy(tmp, name, len);
+                // size_t index = this->cmd.size();
+                // this->cmd.push_back((struct streamnibble) { .type = OP_DEBUGZONEBEGIN, .zonebegin = {
+                //     .name = tmp,
+                //     .zone = NULL
+                // } });
+                return 0;
             }
-            
+
             void zoneend(size_t zone) {
-                this->cmd.push_back((struct streamnibble) { .type = OP_DEBUGZONEEND, .zoneend = zone });
+                ZoneScoped;
+                // this->cmd.push_back((struct streamnibble) { .type = OP_DEBUGZONEEND, .zoneend = zone });
             }
+
+            virtual void begin(void) { }
+            virtual void end(void) { }
     };
 
     // Upload data of a certain size to an offset in a buffer (this can be on a GPU or on the CPU itself, doesn't matter, all this does is do a staging buffer copy).

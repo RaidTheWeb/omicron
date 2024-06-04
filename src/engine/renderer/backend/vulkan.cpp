@@ -357,7 +357,7 @@ namespace OVulkan {
         VK_VERTEX_INPUT_RATE_INSTANCE // RENDERER_RATEINSTANCE
     };
 
-    
+
     static void vulkan_genmips(VkImage image, uint32_t width, uint32_t height, VkImageAspectFlags aspectmask, uint32_t mips, VkPipelineStageFlags stages) {
         VkCommandBuffer cmd = ((VulkanContext *)ORenderer::context)->beginimmediate();
 
@@ -827,7 +827,6 @@ namespace OVulkan {
         VkAttachmentReference depthref = { };
         if (desc->depthref != NULL) {
             if (!ORenderer::isdepthformat(desc->attachments[desc->depthref->attachment].format)) {
-                printf("invalid format %lu.\n", desc->attachments[desc->depthref->attachment].format);
                 free(attachments);
                 free(colourrefs);
                 return ORenderer::RESULT_INVALIDARG;
@@ -1316,7 +1315,7 @@ namespace OVulkan {
         samplercreate.minLod = desc->minlod;
         samplercreate.maxLod = desc->maxlod;
         samplercreate.unnormalizedCoordinates = desc->unnormalisedcoords;
-        
+
         VkResult res = vkCreateSampler(this->dev, &samplercreate, NULL, &vksampler->sampler);
         ASSERT(res == VK_SUCCESS, "Failed to create Vulkan sampler %d.\n", res);
 
@@ -1881,34 +1880,255 @@ namespace OVulkan {
         }
         VkCommandBuffer cmd = this->beginimmediate();
 
-        this->interpretstream(cmd, stream);
+        // this->interpretstream(cmd, stream);
 
         this->endimmediate();
         return ORenderer::RESULT_SUCCESS;
     }
+    ORenderer::Stream *VulkanContext::getimmediate(void) {
+        return &this->imstream;
+    }
 
-    void VulkanContext::recordcmd(VkCommandBuffer cmd, uint32_t image, ORenderer::Stream *stream) {
+    void VulkanStream::begin(void) {
+        if (primary != 2) {
+            VkCommandBufferBeginInfo info = { };
+            info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            info.pNext = NULL;
+            info.flags = 0;
+            info.pInheritanceInfo = NULL;
+            VkResult res = vkBeginCommandBuffer(this->cmd, &info);
+            ASSERT(res == VK_SUCCESS, "Failed to begin Vulkan command buffer %d.\n", res);
+        } else {
+            this->context->beginimmediate();
+        }
+    }
+
+    void VulkanStream::flushcmd(void) {
+        this->tempmem.clear();
+        this->mappings.clear();
+        vkResetCommandBuffer(this->cmd, 0);
+    }
+
+    void VulkanStream::setviewport(struct ORenderer::viewport viewport) {
+        ZoneScoped;
+        VkViewport vkview;
+        vkview.x = viewport.x;
+        vkview.y = viewport.y;
+        vkview.width = viewport.width;
+        vkview.height = viewport.height;
+        vkview.minDepth = viewport.mindepth;
+        vkview.maxDepth = viewport.maxdepth;
+        vkCmdSetViewport(this->cmd, 0, 1, &vkview);
+    }
+
+    void VulkanStream::setscissor(struct ORenderer::rect scissor) {
+        ZoneScoped;
+        VkRect2D vkscissor;
+        vkscissor.extent.width = scissor.width;
+        vkscissor.extent.height = scissor.height;
+        vkscissor.offset.x = scissor.x;
+        vkscissor.offset.y = scissor.y;
+        vkCmdSetScissor(this->cmd, 0, 1, &vkscissor);
+    }
+
+    void VulkanStream::beginrenderpass(struct ORenderer::renderpass renderpass, struct ORenderer::framebuffer framebuffer, struct ORenderer::rect area, struct ORenderer::clearcolourdesc clear) {
+        ZoneScoped;
+        size_t marker = this->tempmem.getmarker();
+
+        VkRenderPass rpass = this->context->renderpasses[renderpass.handle].vkresource.renderpass;
+        VkFramebuffer fb = this->context->framebuffers[framebuffer.handle].vkresource.framebuffer;
+
+        VkRenderPassBeginInfo begin = { };
+        begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        begin.pNext = NULL;
+        begin.renderPass = rpass;
+        begin.framebuffer = fb;
+        begin.renderArea.offset = (VkOffset2D) { .x = area.x, .y = area.y };
+        begin.renderArea.extent = (VkExtent2D) { .width = area.width, .height = area.height };
+        begin.clearValueCount = clear.count;
+        VkClearValue *values = (VkClearValue *)this->tempmem.alloc(sizeof(VkClearValue) * clear.count);
+        for (size_t i = 0; i < clear.count; i++) {
+            if (clear.clear[i].isdepth) {
+                values[i].depthStencil = { .depth = clear.clear[i].depth, .stencil = clear.clear[i].stencil };
+            } else {
+                values[i].color = { clear.clear[i].colour.r, clear.clear[i].colour.g, clear.clear[i].colour.b, clear.clear[i].colour.a };
+            }
+        }
+        begin.pClearValues = values;
+        vkCmdBeginRenderPass(this->cmd, &begin, VK_SUBPASS_CONTENTS_INLINE);
+        this->tempmem.freeto(marker);
+    }
+
+    void VulkanStream::setpipelinestate(struct ORenderer::pipelinestate pipeline) {
+        ZoneScoped;
+        this->pipelinestate = pipeline;
+        struct pipelinestate *state = &this->context->pipelinestates[pipeline.handle].vkresource;
+        vkCmdBindPipeline(this->cmd, state->type == ORenderer::GRAPHICSPIPELINE ? VK_PIPELINE_BIND_POINT_GRAPHICS : VK_PIPELINE_BIND_POINT_COMPUTE, state->pipeline);
+    }
+
+    void VulkanStream::setidxbuffer(struct ORenderer::buffer buffer, size_t offset, bool index32) {
+        ZoneScoped;
+        struct buffer *vkbuffer = &this->context->buffers[buffer.handle].vkresource;
+        vkCmdBindIndexBuffer(this->cmd, vkbuffer->buffer[vkbuffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? this->context->frame : 0], offset, index32 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
+    }
+
+    void VulkanStream::setvtxbuffers(struct ORenderer::buffer *buffers, size_t *offsets, size_t firstbind, size_t bindcount) {
+        ZoneScoped;
+        size_t marker = this->tempmem.getmarker();
+
+        VkBuffer *vkbuffers = (VkBuffer *)this->tempmem.alloc(sizeof(VkBuffer) * bindcount);
+        for (size_t i = 0; i < bindcount; i++) {
+            struct buffer *buffer = &this->context->buffers[buffers->handle].vkresource;
+            vkbuffers[i] = buffer->buffer[buffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? this->context->frame : 0];
+        }
+        vkCmdBindVertexBuffers(this->cmd, 0, bindcount, vkbuffers, offsets);
+    }
+
+    void VulkanStream::setvtxbuffer(struct ORenderer::buffer buffer, size_t offset) {
+        ZoneScoped;
+        struct buffer *vkbuffer = &this->context->buffers[buffer.handle].vkresource;
+        vkCmdBindVertexBuffers(this->cmd, 0, 1, &vkbuffer->buffer[vkbuffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? this->context->frame : 0], &offset);
+    }
+
+    void VulkanStream::draw(size_t vtxcount, size_t instancecount, size_t firstvtx, size_t firstinstance) {
+        ZoneScoped;
+        vkCmdDraw(this->cmd, vtxcount, instancecount, firstvtx, firstinstance);
+    }
+
+    void VulkanStream::drawindexed(size_t idxcount, size_t instancecount, size_t firstidx, size_t vtxoffset, size_t firstinstance) {
+        ZoneScoped;
+        vkCmdDrawIndexed(this->cmd, idxcount, instancecount, firstidx, vtxoffset, firstinstance);
+
+    }
+
+    void VulkanStream::commitresources(void) {
+        ZoneScoped;
+        ASSERT(this->pipelinestate.handle != RENDERER_INVALIDHANDLE, "Attempted to commit resources before deciding pipeline state.\n");
+        size_t marker = this->tempmem.getmarker();
+
+        VkWriteDescriptorSet *wds = (VkWriteDescriptorSet *)this->tempmem.alloc(sizeof(VkWriteDescriptorSet) * this->mappings.size());
+        // XXX: Always be careful about scope! Higher optimisation levels seem to treat anything even one level out of scope as invalid (so we should make sure not to let that happen!)
+        VkDescriptorBufferInfo *buffinfos = (VkDescriptorBufferInfo *)this->tempmem.alloc(sizeof(VkDescriptorBufferInfo) * this->mappings.size());
+        VkDescriptorImageInfo *imginfos = (VkDescriptorImageInfo *)this->tempmem.alloc(sizeof(VkDescriptorImageInfo) * this->mappings.size()); // we're allocating with worst case in mind
+        for (size_t i = 0; i < this->mappings.size(); i++) {
+            wds[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            wds[i].pNext = NULL;
+            wds[i].dstBinding = this->mappings[i].binding;
+            wds[i].dstSet = this->context->pipelinestates[this->pipelinestate.handle].vkresource.descsets[this->context->frame];
+            wds[i].dstArrayElement = 0;
+            wds[i].descriptorCount = 1;
+            if (this->mappings[i].type == ORenderer::RESOURCE_UNIFORM || this->mappings[i].type == ORenderer::RESOURCE_STORAGE) {
+                struct ORenderer::bufferbind bind = this->mappings[i].bufferbind;
+                struct buffer *buffer = &this->context->buffers[bind.buffer.handle].vkresource;
+                wds[i].descriptorType = descriptortypetable[this->mappings[i].type];
+                buffinfos[i].buffer = buffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? buffer->buffer[this->context->frame] : buffer->buffer[0];
+                buffinfos[i].offset = bind.offset;
+                buffinfos[i].range = bind.range == SIZE_MAX ? VK_WHOLE_SIZE : bind.range;
+                wds[i].pBufferInfo = &buffinfos[i];
+            } else if (this->mappings[i].type == ORenderer::RESOURCE_SAMPLER || this->mappings[i].type == ORenderer::RESOURCE_STORAGEIMAGE) {
+                struct ORenderer::sampledbind bind = this->mappings[i].sampledbind;
+                struct sampler *sampler = &this->context->samplers[bind.sampler.handle].vkresource;
+                struct textureview *view = &this->context->textureviews[bind.view.handle].vkresource;
+                wds[i].descriptorType = descriptortypetable[this->mappings[i].type];
+                imginfos[i].sampler = sampler->sampler;
+                imginfos[i].imageView = view->imageview;
+                imginfos[i].imageLayout = layouttable[bind.layout];
+                wds[i].pImageInfo = &imginfos[i];
+            }
+        }
+
+        struct pipelinestate *pipelinestate = &this->context->pipelinestates[this->pipelinestate.handle].vkresource;
+        {
+            ZoneScopedN("push descriptor\n");
+            vkCmdPushDescriptorSetKHR(cmd, pipelinestate->type == ORenderer::GRAPHICSPIPELINE ? VK_PIPELINE_BIND_POINT_GRAPHICS : VK_PIPELINE_BIND_POINT_COMPUTE, pipelinestate->pipelinelayout, 0, this->mappings.size(), wds);
+        }
+
+
+        this->mappings.clear();
+        this->tempmem.freeto(marker);
+    }
+
+    void VulkanStream::bindresource(size_t binding, struct ORenderer::bufferbind bind, size_t type) {
+        ZoneScoped;
+        this->mappings.push_back((struct ORenderer::pipelinestateresourcemap) { .binding = binding, .type = type, .bufferbind = bind });
+    }
+
+    void VulkanStream::bindresource(size_t binding, struct ORenderer::sampledbind bind, size_t type) {
+        ZoneScoped;
+        this->mappings.push_back((struct ORenderer::pipelinestateresourcemap) { .binding = binding, .type = type, .sampledbind = bind });
+    }
+
+    void VulkanStream::transitionlayout(struct ORenderer::texture texture, size_t format, size_t state) {
+        ZoneScoped;
+        struct texture *vktexture = &this->context->textures[texture.handle].vkresource;
+        OVulkan::transitionlayout(this->cmd, vktexture, format, state);
+    }
+
+    void VulkanStream::copybufferimage(struct ORenderer::bufferimagecopy region, struct ORenderer::buffer buffer, struct ORenderer::texture texture) {
+        ZoneScoped;
+        struct buffer *vkbuffer = &this->context->buffers[buffer.handle].vkresource;
+        struct texture *vktexture = &this->context->textures[texture.handle].vkresource;
+        VkBufferImageCopy vkregion = { };
+        vkregion.bufferOffset = region.offset;
+        vkregion.bufferRowLength = region.rowlen;
+        vkregion.bufferImageHeight = region.imgheight;
+        vkregion.imageSubresource.aspectMask =
+            (region.aspect & ORenderer::ASPECT_COLOUR ? VK_IMAGE_ASPECT_COLOR_BIT : 0) |
+            (region.aspect & ORenderer::ASPECT_DEPTH ? VK_IMAGE_ASPECT_DEPTH_BIT : 0) |
+            (region.aspect & ORenderer::ASPECT_STENCIL ? VK_IMAGE_ASPECT_STENCIL_BIT : 0) |
+            0;
+        vkregion.imageSubresource.mipLevel = region.mip;
+        vkregion.imageSubresource.layerCount = region.layercount;
+        vkregion.imageSubresource.baseArrayLayer = region.baselayer;
+        vkregion.imageExtent = { (uint32_t)region.imgextent.width, (uint32_t)region.imgextent.height, (uint32_t)region.imgextent.depth };
+        vkregion.imageOffset = { (int32_t)region.imgoff.x, (int32_t)region.imgoff.y, (int32_t)region.imgoff.z };
+        vkCmdCopyBufferToImage(cmd, vkbuffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? vkbuffer->buffer[this->context->frame] : vkbuffer->buffer[0], vktexture->image, layouttable[vktexture->state], 1, &vkregion);
+    }
+
+    void VulkanStream::submitstream(ORenderer::Stream *stream) {
+
+    }
+
+    void VulkanStream::endrenderpass(void) {
+        ZoneScoped;
+        vkCmdEndRenderPass(this->cmd);
+    }
+
+    void VulkanStream::end(void) {
+
+        if (this->primary != 2) {
+            VkResult res = vkEndCommandBuffer(this->cmd);
+            ASSERT(res == VK_SUCCESS, "Failed to end Vulkan command buffer %d.\n", res);
+        } else {
+            this->context->endimmediate();
+        }
+    }
+
+    void VulkanContext::recordcmd(VkCommandBuffer cmd, uint32_t image, VulkanStream *stream) {
         VkCommandBufferBeginInfo cmdbegin = { };
         cmdbegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         cmdbegin.pNext = NULL;
         cmdbegin.flags = 0;
         cmdbegin.pInheritanceInfo = NULL;
 
-        VkResult res = vkBeginCommandBuffer(cmd, &cmdbegin);
+        stream->claim();
+
+        VkResult res = vkBeginCommandBuffer(stream->cmd, &cmdbegin);
         ASSERT(res == VK_SUCCESS, "Failed to begin Vulkan command buffer %d.\n", res);
 
         this->scratchbuffers[this->frame].reset();
 
         {
-            TracyVkZoneS(this->tracyctx, cmd, "Record Command Buffer", 4);
+            // TracyVkZoneS(this->tracyctx, cmd, "Record Command Buffer", 4);
             // TracyVkZoneTransient(this->tracyctx, _ttz, cmd, data, true); // Use transient zones when names need to be dynamic
             // do stuff
-            this->interpretstream(cmd, stream);
+            // this->interpretstream(cmd, stream);
         }
 
         TracyVkCollect(tracyctx, cmd);
         res = vkEndCommandBuffer(cmd);
         ASSERT(res == VK_SUCCESS, "Failed to end Vulkan command buffer recording %d.\n", res);
+        stream->release();
     }
 
     VkShaderModule VulkanContext::createshadermodule(ORenderer::Shader shader) {
@@ -1993,7 +2213,7 @@ namespace OVulkan {
             vktexture->image = images[i];
             vktexture->flags = VULKAN_TEXTURESWAPCHAIN; // so that we dont try to destroy a VMA allocation that doesn't exist
             char buf[64];
-            sprintf(buf, "Backbuffer Texture %lu", i);
+            snprintf(buf, 63, "Backbuffer Texture %lu", i);
             this->setdebugname(this->swaptextures[i], buf);
             this->resourcemutex.unlock();
 
@@ -2006,7 +2226,7 @@ namespace OVulkan {
             viewdesc.baselayer = 0;
             viewdesc.layercount = 1;
             ASSERT(this->createtextureview(&viewdesc, &this->swaptextureviews[i]) == ORenderer::RESULT_SUCCESS, "Failed to create Vulkan swapchain texture view.\n");
-            sprintf(buf, "Backbuffer Texture View %lu", i);
+            snprintf(buf, 63, "Backbuffer Texture View %lu", i);
             this->setdebugname(this->swaptextureviews[i], buf);
         }
     }
@@ -2029,7 +2249,7 @@ namespace OVulkan {
             fbdesc.attachments = attachments;
             ASSERT(this->createframebuffer(&fbdesc, &this->swapfbs[i]) == ORenderer::RESULT_SUCCESS, "Failed to create Vulkan swapchain framebuffer.\n");
             char buf[64];
-            sprintf(buf, "Backbuffer %lu", i);
+            snprintf(buf, 63, "Backbuffer %lu", i);
             this->setdebugname(this->swapfbs[i], buf);
         }
         return ORenderer::RESULT_SUCCESS;
@@ -2393,6 +2613,12 @@ namespace OVulkan {
         res = vkAllocateCommandBuffers(this->dev, &cmdalloc, this->cmd);
         ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan command buffer %d.\n", res);
 
+        for (size_t i = 0; i < RENDERER_MAXLATENCY; i++) {
+            this->stream[i].cmd = this->cmd[i]; // Give the streams a handle to our command buffer. We can now reference it both through the stream and through this->cmd.
+            this->stream[i].primary = 1;
+            this->stream[i].context = this;
+        }
+
         VkCommandBufferAllocateInfo imalloc = { };
         imalloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         imalloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -2400,6 +2626,10 @@ namespace OVulkan {
         imalloc.commandPool = this->cmdpool;
         res = vkAllocateCommandBuffers(this->dev, &imalloc, &this->imcmd);
         ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan immediate submission command buffer %d.\n", res);
+
+        this->imstream.context = this;
+        this->imstream.primary = 2;
+        this->imstream.cmd = this->imcmd;
 
         VkSemaphoreCreateInfo semcreate = { };
         semcreate.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -2453,9 +2683,7 @@ namespace OVulkan {
         // }
     }
 
-    ORenderer::Stream stream[RENDERER_MAXLATENCY];
-
-    void VulkanContext::execute(GraphicsPipeline *pipeline) {
+    void VulkanContext::execute(GraphicsPipeline *pipeline, void *cam) {
         vkWaitForFences(this->dev, 1, &this->framesinflight[this->frame], VK_TRUE, UINT64_MAX); // await frame completion (of previous version, if we recurse over our allowed latency we'll end up waiting for the original to complete)
 
         uint32_t image;
@@ -2476,12 +2704,13 @@ namespace OVulkan {
         this->swapimage = image;
 
 
-        vkResetCommandBuffer(this->cmd[this->frame], 0);
-        stream[this->frame].flushcmd();
+        // vkResetCommandBuffer(this->cmd[this->frame], 0);
+        this->stream[this->frame].flushcmd();
+        this->scratchbuffers[this->frame].reset(); // Reset scratchbuffers.
 
-        pipeline->execute(&stream[this->frame]);
+        pipeline->execute(&this->stream[this->frame], cam);
 
-        this->recordcmd(this->cmd[this->frame], image, &stream[this->frame]);
+        // this->recordcmd(this->cmd[this->frame], image, &stream[this->frame]);
 
         VkSubmitInfo submit = { };
         submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -2492,7 +2721,8 @@ namespace OVulkan {
         submit.pWaitSemaphores = waitsems;
         submit.pWaitDstStageMask = waitstages;
         submit.commandBufferCount = 1;
-        submit.pCommandBuffers = &this->cmd[this->frame];
+        // submit.pCommandBuffers = &this->cmd[this->frame];
+        submit.pCommandBuffers = &this->stream[this->frame].cmd;
 
         VkSemaphore signalsems[] = { this->renderdone[this->frame] };
         submit.signalSemaphoreCount = 1;

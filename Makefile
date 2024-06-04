@@ -59,7 +59,9 @@ endif
 
 .PHONY: clean utils
 
-all: utils $(OSHADERS) $(BIN_DIR)/$(OUT)
+all: utils shaders $(BIN_DIR)/$(OUT)
+
+shaders: $(OSHADERS)
 
 run: $(OSHADERS) $(BIN_DIR)/$(OUT)
 	@bash run.sh

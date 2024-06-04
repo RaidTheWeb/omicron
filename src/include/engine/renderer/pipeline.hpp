@@ -42,7 +42,7 @@ class GraphicsPipeline {
         // virtual void update(uint64_t flags); // graphics settings have changed, fall through into stage and view update
 
         // void execute(size_t id); // execute pipeline on view (id based)
-        virtual void execute(ORenderer::Stream *stream) { };
+        virtual void execute(ORenderer::Stream *stream, void *cam) { };
 };
 
 // pass contains resources per-stage

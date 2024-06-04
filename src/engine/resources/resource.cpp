@@ -10,6 +10,7 @@ namespace OResource {
     ResourceManager manager;
 
     void ResourceManager::loadrpak(RPak *rpak) {
+        ASSERT(rpak != NULL, "Invalid RPak given to resource manager load.\n");
         for (size_t i = 0; i < rpak->header.num; i++) {
             Resource *res = new Resource(rpak, rpak->entries[i].path);
             res->rpakentry = rpak->entries[i];
@@ -18,17 +19,24 @@ namespace OResource {
     }
 
     void ResourceManager::create(const char *path) {
+        ASSERT(path != NULL, "Invalid path given to resource manager create.\n");
         this->resources[OUtils::fnv1a(path, strlen(path), FNV1A_SEED)] = new Resource(path);
     }
 
     void ResourceManager::create(const char *path, void *src) {
+        ASSERT(path != NULL, "Invalid path given to resource manager virtual create.\n");
+        ASSERT(src != NULL, "Invalid source pointer given to resource manager virtual create.\n");
         this->resources[OUtils::fnv1a(path, strlen(path), FNV1A_SEED)] = new Resource(path, src);
     }
 
-    Resource *ResourceManager::get(const char *path) {
+    OUtils::Handle<Resource> ResourceManager::get(const char *path) {
+        ASSERT(path != NULL, "Invalid path given to resource manager search.\n");
         auto res = this->resources.find(OUtils::fnv1a(path, strlen(path), FNV1A_SEED));
-        ASSERT(res != this->resources.end(), "No resource registered as %s\n", path);
-        return res->second;
+        if (res == this->resources.end()) { // No such resource, return invalid handle.
+            return RESOURCE_INVALIDHANDLE;
+        } else {
+            return res->second->gethandle();
+        }
     }
 }
 

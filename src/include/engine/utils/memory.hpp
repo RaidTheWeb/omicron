@@ -61,7 +61,8 @@ namespace OUtils {
             size_t allocated = 0;
             size_t expandsize = 0;
             uint8_t *blocks = NULL;
-            OJob::Mutex mutex;
+            uint64_t previous = 0;
+            OJob::Spinlock spin;
             std::vector<void *> additionalmem; // additional memory allocations (upon expansion)
 
         public:
@@ -88,7 +89,7 @@ namespace OUtils {
                 this->blocks = (uint8_t *)malloc(this->blocksize * size);
                 ASSERT(this->blocks, "Failed to allocate memory blocks.\n");
                 memset(this->blocks, 0, this->blocksize * size);
-                TracySecureAllocN(this->blocks, this->blocksize * size, "PoolAllocator");
+                TracySecureAllocN(this->blocks, this->blocksize * this->size, "PoolAllocator");
 
                 struct block *block = (struct block *)this->blocks;
                 for (size_t i = 0; i < size - 1; i++) {
@@ -112,7 +113,6 @@ namespace OUtils {
             void expand(void) {
                 // we implictly assume this is already locked as it's only ever called inside a mutex locked call
                 size_t increment = expandsize;
-                printf("expanding after %lu allocations.\n", this->allocated);
                 void *memory = malloc(increment * this->blocksize);
                 ASSERT(memory != NULL, "Failed to allocate memory for pool expansion.\n");
                 memset(memory, 0, increment * this->blocksize);
@@ -130,37 +130,58 @@ namespace OUtils {
             }
 
             void *alloc(void) {
-                this->mutex.lock();
+                // this->mutex.lock();
+                this->spin.lock();
+                if (OJob::currentfibre != NULL) {
+                    TracyMessageL("lock acquired");
+                    // printf("lock acquired on fibre %lu\n", OJob::currentfibre->id);
+                }
                 // ASSERT(this->allocblock != NULL, "Allocation exceeds available blocks.\n");
 
                 if (this->allocblock == NULL) {
                     this->expand();
-                    this->mutex.unlock();
+                    // this->mutex.unlock();
+                    this->spin.unlock();
+                    if (OJob::currentfibre != NULL) {
+                        TracyMessageL("lock released following expansion");
+                        // printf("lock released on fibre before expansion %lu\n", OJob::currentfibre->id);
+                    }
                     return this->alloc();
                 }
 
                 struct block *freeblock = this->allocblock;
+                if (this->name != NULL) {
+                    TracySecureAllocN(freeblock, this->blocksize, this->name);
+                }
                 this->allocblock = this->allocblock->next;
                 this->allocated++;
-                this->mutex.unlock();
-                if (this->name != NULL) {
-                    TracySecureAllocN(freeblock, this->blocksize * this->size, this->name);
+                ASSERT(previous != (uint64_t)freeblock, "Current allocation matches previous %lx == %lx.\n", previous, (uint64_t)previous);
+                this->previous = 0;
+                // this->mutex.unlock();
+                this->spin.unlock();
+                if (OJob::currentfibre != NULL) {
+                    TracyMessageL("lock released");
+                    // printf("lock released on fibre %lu\n", OJob::currentfibre->id);
                 }
+
                 return (void *)freeblock;
             }
 
             void free(void *ptr) {
-                this->mutex.lock();
+                // this->mutex.lock();
+                this->spin.lock();
                 ASSERT(ptr != NULL, "Expected allocation, not NULL.\n");
+
+                TracyMessageL("Freeing!");
+                if (this->name != NULL) {
+                    TracySecureFreeN(ptr, this->name);
+                }
 
                 ((struct block *)ptr)->next = this->allocblock;
                 this->allocblock = ((struct block *)ptr);
                 this->allocated--;
-                this->mutex.unlock();
-
-                if (this->name != NULL) {
-                    TracySecureFreeN(ptr, this->name);
-                }
+                this->spin.unlock();
+                // this->mutex.unlock();
             }
 
             size_t getfree(void) {

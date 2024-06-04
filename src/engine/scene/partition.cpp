@@ -94,7 +94,9 @@ namespace OScene {
             cell->header.next = NULL;
             cell->header.prev = NULL;
             cell->header.count = 0;
+            cell->header.idx = this->cells.size();
             cell->header.id = this->idcounter.fetch_add(1);
+            this->cells.push_back(cell);
             this->map[cell->header.cellpos] = cell;
             icell = this->map[cell->header.cellpos];
         }
@@ -119,6 +121,7 @@ namespace OScene {
             if (!cell->header.prev) { // Cell is the head of a list
                 if (!cell->header.next) { // Only cell in list, invalidate the entire map reference
                     this->map.erase(cell->header.cellpos);
+                    this->cells.erase(this->cells.begin() + cell->header.idx);
                 } else {
                     this->map[cell->header.cellpos] = cell->header.next; // Make this next cell the new head of the list
                 }
@@ -165,7 +168,7 @@ namespace OScene {
         this->add(obj); // get us a new cell
     }
 
-    void ParitionManager::docull(Cell *cell, ORenderer::PerspectiveCamera &camera, CullResult **ret, CullResultList *list) {
+    void ParitionManager::docull(Cell *cell, OMath::Frustum *frustum, CullResult **ret, CullResultList *list) {
         ZoneScoped;
         CullResult *res = *ret;
         size_t cursor = res->header.count;
@@ -173,10 +176,11 @@ namespace OScene {
         while (cell != NULL) { // Iterate over all cells in the chain.
             for (size_t i = 0; i < cell->header.count; i++) {
                 if (!(cell->objects[i]->flags & GameObject::typeflags::IS_CULLABLE)) {
+                    printf("not cullable.\n");
                     continue;
                 }
 
-                OUtils::Handle<CullableObject> obj = cell->objects[i]->gethandle<CullableObject>();
+                OUtils::Handle<GameObject> obj = cell->objects[i]->gethandle<GameObject>();
                 OMath::AABB bounds = obj->bounds;
                 // bounds = bounds.transformed(glm::translate(obj->getglobalposition()) * glm::toMat4(glm::quat(1.0f, 0.0f, 0.0f, 0.0f)) * glm::scale(obj->getglobalscale()));
                 bounds = bounds.transformed(obj->getglobalstaticmatrix());
@@ -186,7 +190,7 @@ namespace OScene {
 
                 // printf("checking bounds %f %f %f to %f %f %f\n", bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z);
                 // printf("checking sphere %f %f %f %f\n", sphere.pos.x, sphere.pos.y, sphere.pos.z, sphere.radius);
-                if (camera.getfrustum().testsphere(sphere) == OMath::Frustum::OUTSIDE) {
+                if (frustum->testsphere(sphere) == OMath::Frustum::OUTSIDE) {
                 // if (camera.getfrustum().testobb(OMath::OBB(bounds, obj->getglobalorientation())) == OMath::Frustum::OUTSIDE) {
                 // if (camera.getfrustum().testaabb(bounds) == OMath::Frustum::OUTSIDE) {
                 // if (!camera.getfrustum().sphereinfrustum(sphere)) {
@@ -208,32 +212,35 @@ namespace OScene {
         *ret = res;
     }
 
-    CullResult *ParitionManager::cull(ORenderer::PerspectiveCamera &camera) {
-        ZoneScoped;
-        // NOTE: We can iterate over cells in an unordered_map yay! no need for an extra shoddy array implementation!
-        if (!this->map.size()) {
-            return NULL;
-        }
-        OMath::Frustum frustum = camera.getfrustum();
+    static void cullworker(OJob::Job *job) {
+        struct ParitionManager::work *work = (struct ParitionManager::work *)job->param;
+        ParitionManager *manager = work->manager;
+        CullResultList *list = work->list;
+        OMath::Frustum *frustum = work->frustum;
 
-        CullResultList list = CullResultList(&this->allocator);
         CullResult *res = NULL;
+        size_t total = 0;
+        for (;;) {
+            const size_t index = work->idx->fetch_add(1); // Grab our working index.
+            if (index >= manager->cells.size()) {
+                return;
+            }
+            total++;
 
-        for (auto it = this->map.begin(); it != this->map.end(); it++) {
-            Cell *cell = it->second;
+            Cell *cell = manager->cells[index];
 
             if (res == NULL) {
-                res = list.acquire();
+                res = list->acquire();
             }
 
-            if (frustum.testaabb(OMath::AABB(cell->header.origin, cell->header.origin + PARTITION_CELLSIZE)) == OMath::Frustum::INSIDE) {
+            if (frustum->testaabb(OMath::AABB(cell->header.origin, cell->header.origin + PARTITION_CELLSIZE)) == OMath::Frustum::INSIDE) {
                 size_t remaining = cell->header.count;
                 size_t srcoff = 0;
 
                 // Directly copy everything inside the cell into the result implicitly (as we can assume total containment == all are visible).
                 while (remaining > 0) {
                     if (res->header.count == CullResult::COUNT) {
-                        res = list.acquire();
+                        res = list->acquire();
                     }
                     size_t remspace = CullResult::COUNT - res->header.count;
                     size_t step = glm::min(remaining, remspace);
@@ -243,11 +250,35 @@ namespace OScene {
                     res->header.count += step;
                     remaining -= step;
                 }
-            // }
-            } else if (frustum.testaabb(OMath::AABB(cell->header.origin - PARTITION_CELLSIZE, cell->header.origin + PARTITION_CELLSIZE)) == OMath::Frustum::INTERSECT) {
-                this->docull(cell, camera, &res, &list);
+            } else if (frustum->testaabb(OMath::AABB(cell->header.origin - PARTITION_CELLSIZE, cell->header.origin + PARTITION_CELLSIZE)) == OMath::Frustum::INTERSECT) {
+                manager->docull(cell, frustum, &res, list);
             }
         }
+
+    }
+
+    CullResult *ParitionManager::cull(ORenderer::PerspectiveCamera &camera) {
+        ZoneScoped;
+        // NOTE: We can iterate over cells in an unordered_map yay! no need for an extra shoddy array implementation!
+        if (!this->map.size()) {
+            return NULL;
+        }
+        OMath::Frustum frustum = camera.getfrustum();
+
+        CullResultList list = CullResultList(&this->allocator);
+        std::atomic<size_t> workeridx = 0; // Index into cell map list, atomic so only one worker is working on a cell at any one time.
+
+
+        struct work work = { .idx = &workeridx, .list = &list, .frustum = &frustum, .manager = this };
+        OJob::Counter counter = OJob::Counter();
+        for (size_t i = 0; i < this->cells.size() % OJob::numworkers; i++) { // Distribute work across the number of workers (not an exact science, only a best case average so that we have a possibility of all the work happening properly distributed).
+            OJob::Job *job = new OJob::Job(cullworker, (uintptr_t)&work);
+            job->counter = &counter;
+            OJob::kickjob(job);
+        }
+
+        counter.wait();
+
         return list.detach(); // Detach list from the handler.
     }
 

@@ -83,24 +83,19 @@ namespace OResource {
             }
 
             static struct ORenderer::texture loadfromdata(struct ORenderer::texturedesc *desc, uint8_t *data, size_t size) {
-                struct ORenderer::bufferdesc stagingdesc = { };
-                stagingdesc.size = size;
-                stagingdesc.usage = ORenderer::BUFFER_TRANSFERSRC;
-                stagingdesc.memprops = ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPUCOHERENT | ORenderer::MEMPROP_CPUSEQUENTIALWRITE;
-                stagingdesc.flags = 0;
                 struct ORenderer::buffer staging = { };
-                ASSERT(ORenderer::context->createbuffer(&stagingdesc, &staging) == ORenderer::RESULT_SUCCESS, "Failed to create staging buffer.\n");
+                ASSERT(ORenderer::context->createbuffer(
+                    &staging, size, ORenderer::BUFFER_TRANSFERSRC,
+                    ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPUCOHERENT | ORenderer::MEMPROP_CPUSEQUENTIALWRITE,
+                    0
+                ) == ORenderer::RESULT_SUCCESS, "Failed to create staging buffer.\n");
 
-                struct ORenderer::buffermapdesc stagingmapdesc = { };
-                stagingmapdesc.buffer = staging;
-                stagingmapdesc.size = size;
-                stagingmapdesc.offset = 0;
                 struct ORenderer::buffermap stagingmap = { };
-                ASSERT(ORenderer::context->mapbuffer(&stagingmapdesc, &stagingmap) == ORenderer::RESULT_SUCCESS, "Failed to map staging buffer.\n");
+                ASSERT(ORenderer::context->mapbuffer(&stagingmap, staging, size, 0) == ORenderer::RESULT_SUCCESS, "Failed to map staging buffer.\n");
                 memcpy(stagingmap.mapped[0], data, size);
                 ORenderer::context->unmapbuffer(stagingmap);
 
-                ORenderer::Stream stream;
+                ORenderer::Stream *stream = ORenderer::context->getimmediate();
                 struct ORenderer::bufferimagecopy region = { };
                 region.offset = 0;
                 region.rowlen = 0;
@@ -116,22 +111,28 @@ namespace OResource {
 
                 ORenderer::context->createtexture(desc, &texture);
 
-                stream.transitionlayout(texture, desc->format, ORenderer::LAYOUT_TRANSFERDST);
-                stream.copybufferimage(region, staging, texture);
-                stream.transitionlayout(texture, desc->format, ORenderer::LAYOUT_SHADERRO);
+                stream->claim();
+                stream->begin();
 
-                ORenderer::context->submitstream(&stream);
+                stream->transitionlayout(texture, desc->format, ORenderer::LAYOUT_TRANSFERDST);
+                stream->copybufferimage(region, staging, texture);
+                stream->transitionlayout(texture, desc->format, ORenderer::LAYOUT_SHADERRO);
+
+                stream->end();
+                stream->release();
 
                 ORenderer::context->destroybuffer(&staging);
                 return texture;
             }
 
-            static struct ORenderer::texture load(Resource *resource) {
+            static struct ORenderer::texture ktxload(OUtils::Handle<Resource> resource) {
+                ASSERT(resource != RESOURCE_INVALIDHANDLE, "Attempting to load texture from invalid resource.\n");
                 struct ORenderer::texture texture;
                 switch (resource->type) {
                     case Resource::SOURCE_RPAK: {
                         struct RPak::tableentry entry = resource->rpakentry;
                         uint8_t *buffer = (uint8_t *)malloc(entry.uncompressedsize);
+                        ASSERT(buffer != NULL, "Failed to allocate buffer for RPak texture data read.\n");
                         ASSERT(resource->rpak->read(resource->path, buffer, entry.uncompressedsize, 0) > 0, "Failed to read RPak file.\n");
                         ktxTexture *ktxtexture;
                         KTX_error_code res = ktxTexture_CreateFromMemory(buffer, entry.uncompressedsize, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxtexture);
@@ -210,8 +211,112 @@ namespace OResource {
                 return texture;
             }
 
+            static struct ORenderer::texture stbiload(OUtils::Handle<Resource> resource) {
+                ASSERT(resource != RESOURCE_INVALIDHANDLE, "Attempting to load texture from invalid resource.\n");
+                struct ORenderer::texture texture;
+                switch (resource->type) {
+                    case Resource::SOURCE_RPAK: {
+                        struct RPak::tableentry entry = resource->rpakentry;
+                        uint8_t *buffer = (uint8_t *)malloc(entry.uncompressedsize);
+                        ASSERT(buffer != NULL, "Failed to allocate buffer for RPak texture data read.\n");
+                        ASSERT(resource->rpak->read(resource->path, buffer, entry.uncompressedsize, 0) > 0, "Failed to read RPak file.\n");
+
+                        int width, height, bpp = 0;
+                        stbi_info_from_memory(buffer, entry.uncompressedsize, &width, &height, &bpp);
+                        uint8_t *data = stbi_load_from_memory(buffer, entry.uncompressedsize, &width, &height, &bpp, bpp == 3 ? STBI_rgb_alpha : 0); // Force RGB to be RGBA
+                        printf("image %s of %dx%dx%d.\n", resource->path, width, height, bpp);
+                        ASSERT(data != NULL, "STBI failed to load texture data from RPak.\n");
+                        struct ORenderer::texturedesc desc = { };
+                        desc.type = ORenderer::IMAGETYPE_2D;
+                        desc.width = width;
+                        desc.height = height;
+                        desc.depth = 1;
+                        desc.mips = 1;
+                        desc.layers = 1;
+                        desc.samples = ORenderer::SAMPLE_X1;
+                        desc.format = bpp == STBI_rgb_alpha || bpp == STBI_rgb ? ORenderer::FORMAT_RGBA8SRGB :
+                            bpp == STBI_grey ? ORenderer::FORMAT_R8 : UINT8_MAX;
+                        ASSERT(desc.format != UINT8_MAX, "Unsupported image format.\n");
+                        desc.memlayout = ORenderer::MEMLAYOUT_OPTIMAL;
+                        desc.usage = ORenderer::USAGE_SAMPLED | ORenderer::USAGE_DST;
+                        texture = loadfromdata(&desc, data, width * height * (bpp == 3 ? 4 : bpp));
+
+                        char text[256];
+                        sprintf(text, "RPak STBI Texture %s", basename(resource->path));
+                        ORenderer::context->setdebugname(texture, text);
+                        stbi_image_free(data);
+                        free(buffer);
+                        // exit(1);
+
+                        break;
+                    }
+                    case Resource::SOURCE_VIRTUAL:
+                        break;
+                    case Resource::SOURCE_OSFS: {
+                        ktxTexture *ktxtexture;
+                        KTX_error_code res = ktxTexture_CreateFromNamedFile(resource->path, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxtexture);
+
+                        ASSERT(res == KTX_SUCCESS, "Failed to create KTX texture from file %u.\n", res);
+                        ASSERT(ktxtexture->classId == ktxTexture2_c, "KTX file must be KTX2.\n");
+
+                        // XXX: Stream this in instead of just shoving it into VRAM immediately
+                        ktx_uint8_t *data = ktxTexture_GetData(ktxtexture);
+                        struct ORenderer::texturedesc desc = { };
+                        ASSERT(ktxtexture->numDimensions == 3 ? ktxtexture->isArray == false : true, "3D image cannot be an array.\n");
+                        desc.type = ktxtexture->isCubemap ? ktxtexture->isArray ? ORenderer::IMAGETYPE_CUBEARRAY : ORenderer::IMAGETYPE_CUBE :
+                            ktxtexture->numDimensions == 1 ? ktxtexture->isArray ? ORenderer::IMAGETYPE_1DARRAY : ORenderer::IMAGETYPE_1D :
+                            ktxtexture->numDimensions == 2 ? ktxtexture->isArray ? ORenderer::IMAGETYPE_2DARRAY : ORenderer::IMAGETYPE_2D :
+                            ktxtexture->numDimensions == 3 ? ORenderer::IMAGETYPE_3D :
+                            UINT8_MAX;
+                        ASSERT(desc.type != UINT8_MAX, "Unsupported KTX2 format.\n");
+                        desc.width = ktxtexture->baseWidth;
+                        desc.height = ktxtexture->baseHeight;
+                        desc.depth = ktxtexture->baseDepth;
+                        desc.mips = ktxtexture->numLevels;
+                        desc.layers = ktxtexture->isCubemap ? 6 : ktxtexture->numLayers;
+                        desc.samples = ORenderer::SAMPLE_X1;
+                        // we assume KTX2 for everything
+                        desc.format = convertformat(((ktxTexture2 *)ktxtexture)->vkFormat);
+                        desc.memlayout = ORenderer::MEMLAYOUT_OPTIMAL;
+                        desc.usage = ORenderer::USAGE_SAMPLED | ORenderer::USAGE_DST;
+                        texture = loadfromdata(&desc, data, ktxtexture->dataSize);
+
+                        char text[256];
+                        sprintf(text, "OSFS KTX2 Texture %s", basename(resource->path));
+                        ORenderer::context->setdebugname(texture, text);
+                        ktxTexture_Destroy(ktxtexture);
+                        break;
+                    }
+                }
+
+                return texture;
+            }
+
+            // XXX: Generic for utils.
+            static bool endswith(const char* str, const char* suffix) {
+                ASSERT(str != NULL && suffix != NULL, "Invalid string or suffic.\n");
+
+                const size_t len = strlen(str);
+                const size_t suffixlen = strlen(suffix);
+
+                if (suffixlen > len) {
+                    return false; // Implicitly false as a string cannot end with something it isn't even long enough to contain.
+                }
+                return !strncmp(str + len - suffixlen, suffix, suffixlen);
+            }
+
+
             static struct ORenderer::texture load(const char *path) {
-                return load(manager.get(path));
+                printf("'%s'\n", path);
+                // XXX: File type inference?
+                if (endswith(path, ".ktx2")) {
+                    return ktxload(manager.get(path));
+                } else if (endswith(path, ".png") || endswith(path, ".jpg") || endswith(path, ".jpeg")) { // All handled with stbi.
+                    return stbiload(manager.get(path));
+                } else {
+                    ASSERT(false, "No viable conversion for unknown file type inferred from path '%s'.\n", path);
+                    return (struct ORenderer::texture) { .handle = RENDERER_INVALIDHANDLE };
+                }
             }
     };
 };

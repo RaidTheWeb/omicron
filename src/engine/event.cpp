@@ -9,7 +9,7 @@ std::vector<struct event_listener> event_listeners;
 OUtils::PoolAllocator event_allocator = OUtils::PoolAllocator(sizeof(struct event), 512); // allocator for events, with the 512 hard limit giving us a maximum of 512 actively queued events (hopefully we never reach this number) this pool allocator will consume 16KB in memory.
 
 struct event_listener *event_listen(uint32_t type, void (*func)(void *self, struct event *event), void *self) {
-JOB_MUTEXSAFE(&event_listenermutex,
+    OJob::ScopedMutex mutex(&event_listenermutex);
 
     struct event_listener listener;
     listener.self = self;
@@ -28,19 +28,17 @@ JOB_MUTEXSAFE(&event_listenermutex,
         // event_listeners->head = event_listeners->tail;
     // }
     // atomic_fetch_add(&event_listeners->size, 1);
-);
     return &(event_listeners[event_listeners.size() - 1]);
 }
 
 void event_relinquish(struct event_listener *listener) {
-JOB_MUTEXSAFE(&event_listenermutex,
+    OJob::ScopedMutex mutex(&event_listenermutex);
     for (auto it = event_listeners.begin(); it != event_listeners.end(); it++) {
         struct event_listener value = *it;
         if (!memcmp(&value, listener, sizeof(struct event_listener))) {
             it = event_listeners.erase(it); // remove listener from list
         }
     }
-);
 }
 
 static void event_listenerwrap(OJob::Job *job) {
@@ -53,7 +51,7 @@ static void event_listenerwrap(OJob::Job *job) {
 
 void event_dispatch(struct event *event) {
     // XXX: This should be allocated from the current frame's allocator rather than `new`
-    OJob::Counter *counter = new OJob::Counter();
+    OJob::Counter counter = OJob::Counter(); // No need to use new as the counter will only exist for the duration of the function scope.
 
     event_listenermutex.lock();
 
@@ -83,19 +81,18 @@ void event_dispatch(struct event *event) {
 
             // XXX: Same story with the allocations here
             OJob::Job *job = new OJob::Job(event_listenerwrap, (uintptr_t)args);
-            job->counter = counter;
+            job->counter = &counter;
             job->priority = OJob::Job::PRIORITY_NORMAL; // events are high priority, but we don't want to clog the high priority queue
             OJob::kickjob(job); // kick the job and continue working asynchronously
         }
 
         event_listenermutex.unlock();
 
-        counter->wait(); // we expect event_dispatch to be run inside a job, we just wait until all the jobs we just scheduled are done
+        counter.wait(); // we expect event_dispatch to be run inside a job, we just wait until all the jobs we just scheduled are done
     } else {
         event_listenermutex.unlock();
     }
 
-    delete counter;
     // free(event);
     event_allocator.free(event);
 }

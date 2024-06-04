@@ -42,7 +42,6 @@ void testjob(OJob::Job *job) {
 }
 
 void callback(struct OResource::AsyncIO::work *work) {
-    printf("work size %lu\n", work->size);
     for (size_t i = 0; i < work->size; i++) {
         printf("%c", ((char *)work->buffer)[i]);
     }
@@ -50,13 +49,24 @@ void callback(struct OResource::AsyncIO::work *work) {
     free(work);
 }
 
+bool keys[348] = { 0 };
+
+glm::vec2 mousepos = glm::vec3(0.0f);
+
+static void keycallback(GLFWwindow *window, int key, int scancode, int action, int mods) {
+    keys[key] = action;
+}
+
 int main(int argc, const char **argv) {
+    memset(keys, 0, sizeof(keys));
     engine_engine = (struct engine *)malloc(sizeof(struct engine));
     glfwInit();
     engine_engine->window = glfwCreateWindow(1280, 720, "Omicron Engine", NULL, NULL);
     int32_t w, h;
     glfwGetWindowSize(engine_engine->window, &w, &h);
     engine_engine->winsize = glm::vec2(w, h);
+
+    glfwSetKeyCallback(engine_engine->window, keycallback);
 
     OJob::init();
 
@@ -88,7 +98,7 @@ int main(int argc, const char **argv) {
     PBRPipeline pipeline = PBRPipeline();
     pipeline.init();
 
-    // OResource::Model::fromassimp("misc/Scene.glb", "misc/testscene.omod");
+    OResource::Model::fromassimp("misc/spray_paint_bottles_4k.gltf", "misc/test2.omod");
 
     // XXX:
     OScene::Scene scene2 = OScene::Scene();
@@ -152,66 +162,54 @@ int main(int argc, const char **argv) {
 
     srand(time(NULL));
 
-    OScene::Test *test = OScene::GameObject::create<OScene::Test>();
-    test->scene = &scene;
+    // OScene::Test *test = OScene::GameObject::create<OScene::Test>();
+    // test->scene = &scene;
     // test->flags |= OScene::GameObject::IS_INVISIBLE;
-    test->model->model = new ORenderer::Model("misc/testscene.omod");
-    test->model->modelpath = "misc/testscene.omod";
-    test->bounds = OMath::AABB(test->model->model->bounds.min, test->model->model->bounds.max);
+    // test->model->model = new ORenderer::Model("misc/testscene.omod");
+    // test->model->modelpath = "misc/testscene.omod";
+    // test->bounds = OMath::AABB(test->model->model->bounds.min, test->model->model->bounds.max);
     // test->translate(glm::vec3(1.0f, 3.0f, 2.0f));
     // test->setrotation(glm::vec3(glm::radians((float)(rand() % 40)), 0.0f, glm::radians((float)(rand() % 40))));
     // test->silly();
     // scene.objects.push_back(test->gethandle());
 
     OScene::Test *m = OScene::GameObject::create<OScene::Test>();
-    m->scene = &scene;
+    m->scene = &scene2;
     // test->flags |= OScene::GameObject::IS_INVISIBLE;
-    m->model->model = new ORenderer::Model("misc/testscene.omod");
-    m->model->modelpath = "misc/testscene.omod";
-    m->bounds = OMath::AABB(test->model->model->bounds.min, test->model->model->bounds.max);
-    m->translate(glm::vec3(1.0f, 3.0f, 2.0f));
-    m->setrotation(glm::vec3(glm::radians((float)(rand() % 40)), 0.0f, glm::radians((float)(rand() % 40))));
+    m->model->model = (new OResource::Resource("misc/test2.omod*", new ORenderer::Model("misc/test2.omod")))->gethandle();
+    m->model->modelpath = "misc/test2.omod";
+    printf("bounds.\n");
+    m->bounds = OMath::AABB(m->model->model->as<ORenderer::Model>()->bounds.min, m->model->model->as<ORenderer::Model>()->bounds.max);
+    printf("done.\n");
+    m->translate(glm::vec3(1.0f, 0.0f, 3.0f));
+    m->scaleby(glm::vec3(8.0));
+    m->setrotation(glm::vec3(glm::radians(0.0f), glm::radians(0.0f), glm::radians(0.0f)));
     m->silly();
-    scene.objects.push_back(m->gethandle());
-
-    scene2.save("saved.osce");
-    scene.load("saved.osce");
+    scene2.objects.push_back(m->gethandle());
 
     {
         ZoneScopedN("Object Creation");
         for (size_t i = 0; i < 2048; i++) {
+            // break;
             OScene::Test *e = OScene::GameObject::create<OScene::Test>();
-            e->scene = &scene;
+            e->scene = &scene2;
             // e->flags |= OScene::GameObject::IS_INVISIBLE;
-            e->model->model = test->model->model;
-            e->model->modelpath = "misc/testscene.omod";
-            e->bounds = OMath::AABB(e->model->model->bounds.min, e->model->model->bounds.max);
+            e->model->model = m->model->model;
+            e->model->modelpath = "misc/test2.omod";
+            e->bounds = m->bounds;
             e->translate(glm::vec3(rand() % 400, rand() % 5, rand() % 400));
             e->setrotation(glm::vec3(glm::radians((float)(rand() % 40)), 0.0f, glm::radians((float)(rand() % 40))));
             e->silly();
-            scene.objects.push_back(e->gethandle());
+            scene2.objects.push_back(e->gethandle());
         }
     }
 
-    // Quick hack to get an orientation quaternion that does this
-    glm::mat4 viewmtx = glm::lookAt(glm::vec3(2.0f, 2.0f, 5.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-
-    glm::vec3 _0; // Scale
-    glm::quat orientation;
-    glm::vec3 _1; // Position
-    glm::vec3 _2; // Skew
-    glm::vec4 _3; // Perspective
-
-    glm::decompose(viewmtx, _0, orientation, _1, _2, _3);
-
-
-    ORenderer::PerspectiveCamera camera = ORenderer::PerspectiveCamera(glm::vec3(2.0f, 2.0f, 5.0f), orientation, 45.0f, 1280 / 720, 0.1f, 10.0f);
-    glm::ivec3 loc = camera.pos * (1 / 300.0f);
-    printf("would be in cell %d %d %d\n", loc.x, loc.y, loc.z);
+    scene2.save("saved.osce");
+    scene.load("saved.osce");
 
     OResource::manager.create("openworldnotes");
 
-    OResource::AsyncIO::loadcall("openworldnotes", 0, SIZE_MAX, callback);
+    // OResource::AsyncIO::loadcall("openworldnotes", 0, SIZE_MAX, callback);
     // void *buffer = NULL;
     // OResource::AsyncIO::loadwait("openworldnotes", &buffer, 0, SIZE_MAX, NULL);
     // printf("%s\n", buffer);
@@ -250,8 +248,55 @@ int main(int argc, const char **argv) {
     oldwidth = width;
     oldheight = height;
 
+    glm::mat4 viewmtx = glm::lookAt(glm::vec3(2.0f, 2.0f, 5.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+    glm::vec3 _0; // Scale
+    glm::quat orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    glm::vec3 _1; // Position
+    glm::vec3 _2; // Skew
+    glm::vec4 _3; // Perspective
+
+    glm::decompose(viewmtx, _0, orientation, _1, _2, _3);
+
+    // ORenderer::PerspectiveCamera camera = ORenderer::PerspectiveCamera(glm::vec3(2.0f, 2.0f, 5.0f), glm::rotate(orientation, glm::radians(10.0f) * (float)glfwGetTime(), glm::vec3(0.0f, 1.0f, 0.0f)), 45.0f, renderrect.width / (float)renderrect.height, 0.1f, 1000.0f);
+    ORenderer::PerspectiveCamera camera = ORenderer::PerspectiveCamera(glm::vec3(2.0f, 2.0f, 5.0f), glm::rotate(orientation, glm::radians(-10.0f), glm::vec3(0.0f, 1.0f, 0.0f)), 45.0f, 1280 / (float)720, 0.1f, 1000.0f);
+
+    int64_t last = utils_getcounter();
+
     while (!glfwWindowShouldClose(engine_engine->window)) {
         glfwPollEvents();
+
+        int64_t now = utils_getcounter();
+        const float delta = (now - last) / 1000000.0f;
+        last = now;
+
+        double mx, my;
+        glfwGetCursorPos(engine_engine->window, &mx, &my);
+        mousepos.x = mx;
+        mousepos.y = my;
+
+        glm::vec3 current = camera.pos;
+        if (keys[GLFW_KEY_W]) {
+            current.z -= 1 * delta;
+        } else if (keys[GLFW_KEY_S]) {
+            current.z += 1 * delta;
+        }
+
+        glm::quat curr = camera.orientation;
+        if (keys[GLFW_KEY_LEFT]) {
+            curr = glm::rotate(curr, glm::radians(-30.0f) * delta, glm::vec3(0.0f, 1.0f, 0.0f));
+        } else if (keys[GLFW_KEY_RIGHT]) {
+            curr = glm::rotate(curr, glm::radians(30.0f) * delta, glm::vec3(0.0f, 1.0f, 0.0f));
+        }
+        camera.setorientation(curr);
+
+        if (keys[GLFW_KEY_A]) {
+            current.x -= 1 * delta;
+        } else if (keys[GLFW_KEY_D]) {
+            current.x += 1 * delta;
+        }
+        camera.setpos(current);
+
         oldwidth = width;
         oldheight = height;
         glfwGetFramebufferSize(engine_engine->window, &width, &height);
@@ -260,7 +305,7 @@ int main(int argc, const char **argv) {
         }
 
         // vulkan_frame(&pipeline);
-        ((OVulkan::VulkanContext *)ORenderer::context)->execute(&pipeline);
+        ((OVulkan::VulkanContext *)ORenderer::context)->execute(&pipeline, &camera);
         FrameMark;
         // break;
         // return 0;

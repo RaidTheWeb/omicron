@@ -17,6 +17,8 @@ namespace OScene {
                 glm::vec3 position;
                 glm::quat orientation;
                 glm::vec3 scale;
+                glm::vec3 min;
+                glm::vec3 max;
                 size_t parent; // parent object ID
                 uint32_t numchildren; // number of children objects in children[]
                 uint32_t datasize; // serialised data size for data[]

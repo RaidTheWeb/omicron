@@ -245,6 +245,59 @@ namespace OVulkan {
             T vkresource;
     };
 
+    class VulkanContext;
+    class VulkanStream : public ORenderer::Stream {
+        private:
+            OJob::Mutex mutex;
+        public:
+            VkCommandBuffer cmd = VK_NULL_HANDLE;
+            VulkanContext *context;
+            uint8_t primary = 0;
+
+            void flushcmd(void);
+
+            void setviewport(struct ORenderer::viewport viewport);
+            void setscissor(struct ORenderer::rect scissor);
+            void beginrenderpass(struct ORenderer::renderpass renderpass, struct ORenderer::framebuffer framebuffer, struct ORenderer::rect area, struct ORenderer::clearcolourdesc clear);
+
+            void endrenderpass(void);
+            void setpipelinestate(struct ORenderer::pipelinestate pipeline);
+
+            // Set the current index buffer for use before a draw call.
+            void setidxbuffer(struct ORenderer::buffer buffer, size_t offset, bool index32);
+
+            // Set the current vertex buffers for use before a draw call.
+            void setvtxbuffers(struct ORenderer::buffer *buffers, size_t *offsets, size_t firstbind, size_t bindcount);
+
+            void setvtxbuffer(struct ORenderer::buffer buffer, size_t offset);
+
+            // Draw unindexed vertices.
+            void draw(size_t vtxcount, size_t instancecount, size_t firstvtx, size_t firstinstance);
+
+            // Draw indexed vertices.
+            void drawindexed(size_t idxcount, size_t instancecount, size_t firstidx, size_t vtxoffset, size_t firstinstance);
+
+            // Commit currently set pipeline resources.
+            void commitresources(void);
+
+            // Bind a pipeline resource to a binding.
+            void bindresource(size_t binding, struct ORenderer::bufferbind bind, size_t type);
+
+            void bindresource(size_t binding, struct ORenderer::sampledbind bind, size_t type);
+
+            // Transition a texture between layouts.
+            void transitionlayout(struct ORenderer::texture texture, size_t format, size_t state);
+
+            void copybufferimage(struct ORenderer::bufferimagecopy region, struct ORenderer::buffer buffer, struct ORenderer::texture texture);
+
+            // Submit another stream's command list to the current command list (the result will be as if the commands were submitted to this current stream)
+            void submitstream(ORenderer::Stream *stream);
+
+
+            void begin(void);
+            void end(void);
+    };
+
     struct resource {
         public:
             union {
@@ -258,7 +311,7 @@ namespace OVulkan {
     };
 
     class VulkanContext;
- 
+
     class VulkanContext : public ORenderer::RendererContext {
         public:
             TracyVkCtx tracyctx;
@@ -275,7 +328,7 @@ namespace OVulkan {
             std::unordered_map<size_t, VulkanResource<struct renderpass>> renderpasses;
             std::unordered_map<size_t, VulkanResource<struct pipelinestate>> pipelinestates;
             std::unordered_map<size_t, VulkanResource<struct sampler>> samplers;
-            size_t resourcehandle;
+            size_t resourcehandle = 0;
 
             ORenderer::ScratchBuffer scratchbuffers[RENDERER_MAXLATENCY];
 
@@ -320,14 +373,16 @@ namespace OVulkan {
 
             VkCommandPool cmdpool;
             VkCommandBuffer cmd[RENDERER_MAXLATENCY + 1]; // With additional space for tracy cmd buffer
+            VulkanStream stream[RENDERER_MAXLATENCY];
 
             VkSemaphore imagepresent[RENDERER_MAXLATENCY];
             VkSemaphore renderdone[RENDERER_MAXLATENCY];
             VkFence framesinflight[RENDERER_MAXLATENCY];
             uint32_t frame = 0; // 0-VULKAN_MAXLATENCY
-            
+
             VkFence imfence; // Immediate submission fence
             VkCommandBuffer imcmd; // Immediate command buffer
+            VulkanStream imstream; // Immediate stream
 
             VulkanContext(struct ORenderer::init *init);
             ~VulkanContext(void);
@@ -359,6 +414,7 @@ namespace OVulkan {
                 *texture = this->swaptextures[this->frame];
                 return ORenderer::RESULT_SUCCESS;
             }
+            ORenderer::Stream *getimmediate(void);
             uint8_t transitionlayout(struct ORenderer::texture texture, size_t format, size_t state);
 
             uint8_t submitstream(ORenderer::Stream *stream);
@@ -382,7 +438,7 @@ namespace OVulkan {
             }
 
             void adjustorthoprojection(float *top, float *bottom) {
-                // Swap around top and bottom as it works differently in Vulkan than OpenGL.
+                // Swap around top and bottom as it Y is flipped in Vulkan.
                 float tmp0 = *top;
                 float tmp1 = *bottom;
                 *top = tmp1;
@@ -395,18 +451,17 @@ namespace OVulkan {
             void endimmediate(void);
 
 
-            void execute(GraphicsPipeline *pipeline);
+            void execute(GraphicsPipeline *pipeline, void *cam);
             uint8_t createbackbuffer(struct ORenderer::renderpass pass, struct ORenderer::textureview *depth = NULL);
             void interpretstream(VkCommandBuffer cmd, ORenderer::Stream *stream);
             VkShaderModule createshadermodule(ORenderer::Shader shader);
             void createswapchainviews(void);
             void createswapchain(void); // XXX: Flags (presentation mode, etc.)
             void destroyswapchain(void);
-            void recordcmd(VkCommandBuffer cmd, uint32_t image, ORenderer::Stream *stream);
+            void recordcmd(VkCommandBuffer cmd, uint32_t image, VulkanStream *stream);
     };
 
     ORenderer::RendererContext *createcontext(void);
-
 }
 
 #endif

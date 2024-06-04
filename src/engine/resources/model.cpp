@@ -10,7 +10,7 @@
 namespace OResource {
 
     Model::Model(const char *path) {
-        Resource *res = manager.get(path);
+        OUtils::Handle<Resource> res = manager.get(path);
 
         if (res->type == Resource::SOURCE_OSFS) {
             FILE *f = fopen(res->path, "r");
@@ -101,7 +101,7 @@ namespace OResource {
             struct meshhdr *meshheaders = (struct meshhdr *)malloc(sizeof(struct meshhdr) * this->header.nummesh);
             ASSERT(meshheaders != NULL, "Failed to allocate memory for mesh headers.\n");
             ASSERT(rpak->read(
-                res->path, meshheaders, sizeof(struct meshhdr) * this->header.nummesh, 
+                res->path, meshheaders, sizeof(struct meshhdr) * this->header.nummesh,
                 sizeof(struct header) + (sizeof(struct material) * this->header.nummaterial)) > 0, "Failed to read OMod file mesh headers from RPak.\n"
             );
             OUtils::print("Material ID %u, Vertices: %u, Indices: %u, Offset: 0x%lx\n", meshheaders[0].material, meshheaders[0].vertexcount, meshheaders[0].indexcount, meshheaders[0].offset);
@@ -194,6 +194,17 @@ namespace OResource {
                 material->Get(AI_MATKEY_ROUGHNESS_FACTOR, temp);
                 omaterial.roughnessfactor = temp;
                 omesh.header.material = id;
+
+                aiString str;
+                if (material->GetTexture(AI_MATKEY_BASE_COLOR_TEXTURE, &str) == AI_SUCCESS) {
+                   strncpy(omaterial.base, str.C_Str(), sizeof(omaterial.base));
+                }
+                if (material->GetTexture(aiTextureType_NORMALS, 0, &str) == AI_SUCCESS) {
+                    strncpy(omaterial.normal, str.C_Str(), sizeof(omaterial.normal));
+                }
+                if (material->GetTexture(aiTextureType_METALNESS, 0, &str) == AI_SUCCESS) {
+                    strncpy(omaterial.mr, str.C_Str(), sizeof(omaterial.mr));
+                }
                 materials->push_back(omaterial);
             }
             omesh.header.bmin = glm::vec3(mesh->mAABB.mMin.x, mesh->mAABB.mMin.y, mesh->mAABB.mMin.z);
@@ -216,6 +227,7 @@ namespace OResource {
             aiProcess_FlipUVs |
             aiProcess_JoinIdenticalVertices |
             aiProcess_ImproveCacheLocality |
+            aiProcess_PreTransformVertices |
             aiProcess_LimitBoneWeights |
             aiProcess_RemoveRedundantMaterials |
             aiProcess_SplitLargeMeshes |
@@ -245,7 +257,8 @@ namespace OResource {
 
         ASSERT(fwrite(&header, sizeof(struct header), 1, f), "Failed to write OMod model header.\n");
         for (size_t i = 0; i < header.nummaterial; i++) {
-            strcpy(materials[i].base, "misc/out2.ktx2");
+            printf("%s\n", materials[i].mr);
+            // strcpy(materials[i].base, "misc/out2.ktx2");
             ASSERT(fwrite(&materials[i], sizeof(struct material), 1, f), "Failed to write OMod material.\n");
         }
 
@@ -256,7 +269,7 @@ namespace OResource {
             ASSERT(fwrite(&meshes[i].header, sizeof(struct meshhdr), 1, f), "Failed to write OMod mesh header.\n");
             approxoff += (sizeof(struct mesh::vertex) * meshes[i].header.vertexcount) + (sizeof(uint16_t) * meshes[i].header.indexcount);
         }
-        
+
         for (size_t i = 0; i < header.nummesh; i++) {
             ASSERT(fwrite(meshes[i].vertices, sizeof(struct mesh::vertex) * meshes[i].header.vertexcount, 1, f), "Failed to write OMod mesh vertex data.\n");
             ASSERT(fwrite(meshes[i].indices, sizeof(uint16_t) * meshes[i].header.indexcount, 1, f), "Failed to write OMod mesh indices data.\n");

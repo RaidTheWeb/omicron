@@ -4,7 +4,7 @@ static __attribute__((noinline)) size_t coroutine_alignforward(size_t addr, size
     return (addr + (align - 1)) & ~(align - 1);
 }
 
-static __thread struct coroutine *coroutine_current = NULL;
+static thread_local struct coroutine *coroutine_current = NULL;
 
 static __attribute__((noinline)) void coroutine_preparejumpin(struct coroutine *co) {
     struct coroutine *prev = coroutine_running();
@@ -207,7 +207,7 @@ int coroutine_create(struct coroutine **co, struct coroutine_desc *desc) {
 }
 
 int coroutine_destroy(struct coroutine *co) {
-    ASSERT(co, "Attempted to resume invalid coroutine.\n");
+    ASSERT(co, "Attempted to destroy invalid coroutine.\n");
 
     int res = coroutine_uninit(co);
     if (res != 0) {
@@ -219,17 +219,17 @@ int coroutine_destroy(struct coroutine *co) {
 }
 
 int coroutine_resume(struct coroutine *co) {
-    ASSERT(co->magic == COROUTINE_MAGICNUMBER, "Attempted to resume a corrupt coroutine.\n");
     ASSERT(co, "Attempted to resume invalid coroutine.\n");
-    ASSERT(co->state == COROUTINE_SUSPENDED, "Attempted to resume a coroutine that isn't suspended (potential resume-before-yield race condition, check code to see if a coroutine has any possibility of being resumed before it gets to coroutine_yield()).\n");
+    ASSERT(co->magic == COROUTINE_MAGICNUMBER, "Attempted to resume a corrupt coroutine.\n");
+    ASSERT(co->state == COROUTINE_SUSPENDED, "Attempted to resume a coroutine that isn't suspended (potential resume-before-yield race condition, check code to see if a coroutine has any possibility of being resumed before it gets to coroutine_yield()), current state is %s.\n", co->state == COROUTINE_RUNNING ? "RUNNING" : co->state == COROUTINE_DEAD ? "DEAD" : "NORMAL");
     co->state = COROUTINE_RUNNING;
     coroutine_jumpin(co);
     return 0;
 }
 
 int coroutine_yield(struct coroutine *co) {
+    volatile size_t dummy; // Dummy address placed here (and only here) so that we can grab the current stack address without issue.
     ASSERT(co, "Attempt to yield invalid coroutine.\n");
-    volatile size_t dummy;
     size_t stackaddr = (size_t)&dummy;
     size_t stackmin = (size_t)co->stackbase;
     size_t stackmax = stackmin + co->stacksize;

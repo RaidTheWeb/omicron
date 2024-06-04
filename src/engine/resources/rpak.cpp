@@ -29,8 +29,8 @@ namespace OResource {
     }
 
     struct RPak::stat RPak::stat(const char *path) {
-    JOB_MUTEXSAFE(&this->lock,
         ASSERT(path, "Attempting to read NULL file path.\n");
+        OJob::ScopedMutex mutex(&this->lock);
 
         struct RPak::tableentry *entry = NULL;
         for (size_t i = 0; i < this->header.num; i++) {
@@ -41,19 +41,17 @@ namespace OResource {
         }
 
 
-        JOB_MUTEXSAFEEARLY(&this->lock);
         return (struct RPak::stat) { .realsize = SIZE_MAX, .decompressedsize = SIZE_MAX, .compressed = true };
     found:
-    );
         return (struct RPak::stat) { .realsize = entry->compressed ? entry->compressedsize : entry->uncompressedsize, .decompressedsize = entry->uncompressedsize, .compressed = entry->compressed };
     }
 
     // size_t rpak_read(struct rpak_file *file, const char *path, void *buf, size_t size, const size_t off) {
     size_t RPak::read(const char *path, void *buf, const size_t size, const size_t off) {
-    JOB_MUTEXSAFE(&this->lock,
         ASSERT(path, "Attempting to read NULL file path.\n");
         ASSERT(buf, "Attempting to read into NULL buffer.\n");
         ASSERT(size > 0, "Read zero bytes.\n");
+        OJob::ScopedMutex mutex(&this->lock);
 
         struct RPak::tableentry *entry = NULL;
         for (size_t i = 0; i < this->header.num; i++) {
@@ -63,7 +61,6 @@ namespace OResource {
             }
         }
 
-        JOB_MUTEXSAFEEARLY(&this->lock);
         return 0;
     found:
         size_t finalsize = size;
@@ -87,7 +84,6 @@ namespace OResource {
             memcpy(buf, tbuf + off, size);
             free(tbuf);
         }
-    );
         return size;
     }
 

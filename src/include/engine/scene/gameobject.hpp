@@ -156,6 +156,7 @@ namespace OScene {
                 void *pageref = NULL; // Pointer reference to the current cell page (Used to index directly into linked list of cells)
                 size_t pageid; // Backup ID to prevent stale references to old cells (cells are pool allocated, although this shouldn't be much of a problem as we memset new allocations anyway)
             } culldata;
+            OMath::AABB bounds;
 
             virtual void construct(void) { }
             virtual void deconstruct(void) { }
@@ -235,15 +236,6 @@ namespace OScene {
             void orientate(glm::quat q);
             void lookat(glm::vec4 target);
             void scaleby(glm::vec3 s);
-    };
-
-    class CullableObject : public GameObject {
-        public:
-            OMath::AABB bounds;
-
-            CullableObject(void) {
-                this->flags |= IS_CULLABLE;
-            }
     };
 
     class Component {
@@ -359,7 +351,7 @@ namespace OScene {
     // Game object tied to one or more meshes
     class ModelInstance : public Component {
         public:
-            ORenderer::Model *model;
+            OUtils::Handle<OResource::Resource> model;
             char *modelpath;
 
             ModelInstance(void) {
@@ -383,25 +375,38 @@ namespace OScene {
             void deserialise(OResource::Serialiser *serialiser) {
                 uint32_t len = 0;
                 serialiser->read<uint32_t>(&len);
-                if (len > 0) {
+                if (len > 0) { // XXX: TODO: Resolve resource.
                     this->modelpath = (char *)malloc(len + 1);
                     ASSERT(this->modelpath, "Failed to allocate memory for deserialising the model path.\n");
                     for (size_t i = 0; i < len; i++) {
-                        serialiser->read<char>(&this->modelpath[i]);
+                        serialiser->read<char>(&this->modelpath[i]); // Read in the model path from the serialiser incrementally.
                     }
                     this->modelpath[len] = '\0';
-                    this->model = new ORenderer::Model(this->modelpath);
+                    char *loaded = (char *)malloc(len + 2);
+                    ASSERT(loaded != NULL, "Failed to allocate memory for marking a loader version of the model path.\n");
+                    snprintf(loaded, len + 2, "%s*", this->modelpath); // Represent the virtual resource as the same path but with an asterisk to mark it "loaded". If the model path remains the same for multiple objects, we'll end up just grabbing one that's already been loaded instead of loading it again and consuming more memory.
+                    loaded[len + 1] = '\0';
+
+                    // Formatted like this so we'll end up setting the model either way if it *does* exist without having to do it twice
+                    // This code here will basically let us load an already loaded copy of the model whenever we need it to be loaded.
+                    if ((this->model = OResource::manager.get(loaded)) == RESOURCE_INVALIDHANDLE) {
+                        OResource::manager.create(loaded, new ORenderer::Model(this->modelpath));
+                        this->model = OResource::manager.get(loaded);
+                    } else {
+                        free(loaded); // Not needed to be persistent for the resource manager, free it.
+                    }
                 }
             }
     };
 
-    class Test : public CullableObject {
+    class Test : public GameObject {
         public:
             OUtils::Handle<ModelInstance> model;
             OUtils::Handle<SpotLight> light;
 
             void construct(void) {
                 this->type = OUtils::STRINGID("Test");
+                this->flags |= IS_CULLABLE;
                 this->model = Component::create<ModelInstance>(this->gethandle())->gethandle<ModelInstance>();
                 this->light = Component::create<SpotLight>(this->gethandle())->gethandle<SpotLight>();
             }
@@ -412,6 +417,7 @@ namespace OScene {
             }
 
             bool hascomponent(uint32_t type) {
+                ZoneScoped;
                 COMPONENT_HASRESOLVER(
                     COMPONENT_HASRESOLUTION(OUtils::STRINGID("ModelInstance"));
                     COMPONENT_HASRESOLUTION(OUtils::STRINGID("SpotLight"));
@@ -419,6 +425,7 @@ namespace OScene {
             }
 
             OUtils::Handle<Component> getcomponent(uint32_t type) {
+                ZoneScoped;
                 COMPONENT_GETRESOLVER(
                     COMPONENT_GETRESOLUTION(OUtils::STRINGID("ModelInstance"), this->model);
                     COMPONENT_GETRESOLUTION(OUtils::STRINGID("SpotLight"), this->light);
