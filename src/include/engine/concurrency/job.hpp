@@ -74,6 +74,7 @@ namespace OJob {
         public:
             enum status {
                 STATUS_DONE = 0,
+                STATUS_HANG, // Indefinite suspend due to assertion failure.
                 STATUS_YIELD,
                 STATUS_WAIT
             };
