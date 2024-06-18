@@ -24,6 +24,7 @@ namespace OJob {
 
 #define JOB_WAITLISTSIZE 16 // 16 jobs may wait on a single counter at any one time (seeing as in all but the most uncommon use cases we'd only need one job to wait on a counter, this works nicely)
 
+    // Provide facilities to wait for job lifetimes.
     class Counter {
         public:
             std::atomic<ssize_t> ref;
@@ -48,6 +49,22 @@ namespace OJob {
             ~Counter(void) {
                 pthread_spin_destroy(&this->lock);
                 pthread_spin_destroy(&this->waitlistlock);
+            }
+    };
+
+    // Simple semaphore implemented using the counter system.
+    class Semaphore {
+        public:
+            Counter counter;
+
+            Semaphore(void) {
+                this->counter.ref = 1; // Begin with a single reference so as soon as trigger() is called we can wake all waiting jobs.
+            }
+
+            void wait(void);
+            void trigger(void);
+            void reset(void) {
+                this->counter.ref.store(1); // Reset reference count to allow the semaphore to trigger once more.
             }
     };
 

@@ -80,10 +80,8 @@ namespace OScene {
         Cell *icell = NULL;
         const glm::ivec3 cellpos = obj->getglobalposition() * (1 / PARTITION_CELLSIZE);
         if (this->map.find(cellpos) != this->map.end()) { // XXX: Rework this so we only have one call to do
-            glm::vec3 pos = obj->getglobalposition();
             icell = this->map[cellpos]; // Retrieve head of cell page list
         } else {
-            glm::vec3 pos = obj->getglobalposition();
             Cell *cell = (Cell *)this->allocator.alloc();
             memset(cell, 0, sizeof(Cell));
             for (size_t i = 0; i < cell->COUNT; i++) {

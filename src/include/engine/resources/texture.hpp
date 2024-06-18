@@ -91,7 +91,7 @@ namespace OResource {
                 ) == ORenderer::RESULT_SUCCESS, "Failed to create staging buffer.\n");
 
                 struct ORenderer::buffermap stagingmap = { };
-                ASSERT(ORenderer::context->mapbuffer(&stagingmap, staging, size, 0) == ORenderer::RESULT_SUCCESS, "Failed to map staging buffer.\n");
+                ASSERT(ORenderer::context->mapbuffer(&stagingmap, staging, 0, size) == ORenderer::RESULT_SUCCESS, "Failed to map staging buffer.\n");
                 memcpy(stagingmap.mapped[0], data, size);
                 ORenderer::context->unmapbuffer(stagingmap);
 
@@ -157,6 +157,7 @@ namespace OResource {
                         desc.samples = ORenderer::SAMPLE_X1;
                         // we assume KTX2 for everything
                         desc.format = convertformat(((ktxTexture2 *)ktxtexture)->vkFormat);
+                        ASSERT(desc.format != ORenderer::FORMAT_COUNT, "Could not infer ktx2 image format from provided Vulkan format %d.\n", ((ktxTexture2 *)ktxtexture)->vkFormat);
                         desc.memlayout = ORenderer::MEMLAYOUT_OPTIMAL;
                         desc.usage = ORenderer::USAGE_SAMPLED | ORenderer::USAGE_DST;
                         texture = loadfromdata(&desc, data, ktxtexture->dataSize);
@@ -196,6 +197,7 @@ namespace OResource {
                         desc.samples = ORenderer::SAMPLE_X1;
                         // we assume KTX2 for everything
                         desc.format = convertformat(((ktxTexture2 *)ktxtexture)->vkFormat);
+                        ASSERT(desc.format != ORenderer::FORMAT_COUNT, "Could not infer ktx2 image format from provided Vulkan format %d.\n", ((ktxTexture2 *)ktxtexture)->vkFormat);
                         desc.memlayout = ORenderer::MEMLAYOUT_OPTIMAL;
                         desc.usage = ORenderer::USAGE_SAMPLED | ORenderer::USAGE_DST;
                         texture = loadfromdata(&desc, data, ktxtexture->dataSize);

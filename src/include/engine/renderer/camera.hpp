@@ -38,15 +38,31 @@ namespace ORenderer {
 
             // Frustum
             OMath::Frustum frustum;
-            std::atomic<uint8_t> dirty = flags::ALL;
+            std::atomic<uint8_t> dirty;
 
             PerspectiveCamera(const glm::vec3 &pos, const glm::quat &orientation, float fov, float ar, float near = 0.1f, float far = 100.0f) {
+                this->dirty.store(flags::ALL);
                 this->pos = pos;
                 this->orientation = orientation;
                 this->fov = fov;
                 this->ar = ar;
                 this->near = near;
                 this->far = far;
+            }
+
+            PerspectiveCamera(PerspectiveCamera &cam) {
+                this->fov = cam.fov;
+                this->ar = cam.ar;
+                this->orientation = cam.orientation;
+                this->near = cam.near;
+                this->far = cam.far;
+                this->proj = cam.proj;
+                this->view = cam.view;
+                this->viewproj = cam.viewproj;
+                this->invviewproj = cam.invviewproj;
+                this->frustum = cam.frustum;
+                this->dirty.store(cam.dirty.load());
+                this->pos = cam.pos;
             }
 
             void setfov(float fov) {

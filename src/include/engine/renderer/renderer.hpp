@@ -101,6 +101,7 @@ namespace ORenderer {
                 } else if (res->type == OResource::Resource::SOURCE_RPAK) {
                     struct OResource::RPak::tableentry entry = res->rpakentry;
                     void *code = malloc(entry.uncompressedsize);
+                    ASSERT(code != NULL, "Failed to allocate memory for shader.\n");
                     ASSERT(res->rpak->read(path, code, entry.uncompressedsize, 0) > 0, "Failed to load shader '%s'.\n", path);
                     this->size = entry.uncompressedsize;
                     this->type = type;
@@ -470,11 +471,10 @@ namespace ORenderer {
         STAGE_TESSEVALUATION = (1 << 2),
         STAGE_GEOMETRY = (1 << 3),
         STAGE_FRAGMENT = (1 << 4),
-        STAGE_COMPUTE = (1 << 5)
+        STAGE_COMPUTE = (1 << 5),
+        STAGE_ALL = (STAGE_VERTEX | STAGE_TESSCONTROL | STAGE_TESSEVALUATION | STAGE_GEOMETRY | STAGE_FRAGMENT | STAGE_COMPUTE),
+        STAGE_ALLGRAPHIC = (STAGE_VERTEX | STAGE_TESSCONTROL | STAGE_TESSEVALUATION | STAGE_GEOMETRY | STAGE_FRAGMENT)
     };
-
-#define STAGE_ALL (STAGE_VERTEX | STAGE_TESSCONTROL | STAGE_TESSEVALUATION | STAGE_GEOMETRY | STAGE_FRAGMENT | STAGE_COMPUTE)
-#define STAGE_ALLGRAPHIC (STAGE_VERTEX | STAGE_TESSCONTROL | STAGE_TESSEVALUATION | STAGE_GEOMETRY | STAGE_FRAGMENT)
 
     enum {
         USAGE_COLOUR = (1 << 0), // used as a colour attachment
@@ -528,7 +528,8 @@ namespace ORenderer {
 
     enum {
         RESOURCE_SAMPLER,
-        RESOURCE_STORAGEIMAGE,
+        RESOURCE_TEXTURE,
+        RESOURCE_STORAGETEXTURE,
         RESOURCE_UNIFORM, // UBO
         RESOURCE_STORAGE, // SSBO
     };
@@ -742,7 +743,8 @@ namespace ORenderer {
 
     struct computepipelinestatedesc {
         size_t resourcecount;
-        struct pipelinestateresourcedesc *resources;
+        size_t constantssize = 0;
+        struct resourcesetlayout *reslayout;
         Shader stage;
     };
 
@@ -765,14 +767,14 @@ namespace ORenderer {
         size_t tesspoints;
         size_t scissorcount;
         size_t viewportcount;
-        size_t resourcecount;
         size_t stagecount;
+        size_t constantssize = 0;
         struct vtxinputdesc *vtxinput;
         struct rasteriserdesc *rasteriser;
         struct multisampledesc *multisample;
         struct blendstatedesc *blendstate;
         struct depthstencilstatedesc *depthstencil;
-        struct pipelinestateresourcedesc *resources;
+        struct resourcesetlayout *reslayout;
         struct renderpass *renderpass;
         Shader *stages;
     };
@@ -798,11 +800,50 @@ namespace ORenderer {
         size_t handle = RENDERER_INVALIDHANDLE;
     };
 
+    struct samplerbind {
+        struct sampler sampler;
+        size_t layout;
+        size_t id;
+    };
+
+    struct texturebind {
+        struct textureview view;
+        size_t layout;
+        size_t id;
+    };
+
+    enum {
+        RESOURCEFLAG_BINDLESS
+    };
+
+    struct resourcedesc {
+        size_t binding;
+        size_t stages;
+        size_t count;
+        size_t type;
+        size_t flag = 0;
+    };
+
+    struct resourcesetlayout {
+        size_t handle = RENDERER_INVALIDHANDLE;
+    };
+
+    struct resourceset {
+        size_t handle = RENDERER_INVALIDHANDLE;
+    };
+
+    struct resourcesetdesc {
+        struct resourcedesc *resources;
+        size_t resourcecount;
+        size_t flag = 0;
+    };
+
     class Stream;
     class ScratchBuffer;
 
     class RendererContext {
         public:
+
             RendererContext(struct init *init) { };
             virtual ~RendererContext(void) { };
 
@@ -882,44 +923,22 @@ namespace ORenderer {
 
             // Create a graphics pipeline state.
             virtual uint8_t createpipelinestate(struct pipelinestatedesc *desc, struct pipelinestate *state) { return RESULT_SUCCESS; }
-            uint8_t createpipelinestate(
-                struct pipelinestate *state, uint8_t primtopology,
-                size_t tesspoints, size_t scissorcount,
-                size_t viewportcount, size_t resourcecount,
-                size_t stagecount, struct vtxinputdesc *vtxinput,
-                struct rasteriserdesc *rasteriser, struct multisampledesc *multisample,
-                struct blendstatedesc *blendstate, struct depthstencilstatedesc *depthstencil,
-                struct pipelinestateresourcedesc *resources, struct renderpass *renderpass,
-                Shader *stages) {
-                struct pipelinestatedesc desc = (struct pipelinestatedesc) {
-                    .primtopology = primtopology,
-                    .tesspoints = tesspoints,
-                    .scissorcount = scissorcount,
-                    .viewportcount = viewportcount,
-                    .resourcecount = resourcecount,
-                    .stagecount = stagecount,
-                    .vtxinput = vtxinput,
-                    .rasteriser = rasteriser,
-                    .multisample = multisample,
-                    .blendstate = blendstate,
-                    .depthstencil = depthstencil,
-                    .resources = resources,
-                    .renderpass = renderpass,
-                    .stages = stages
-                };
-                return this->createpipelinestate(&desc, state);
-            }
 
             // Create a compute pipeline state.
             virtual uint8_t createcomputepipelinestate(struct computepipelinestatedesc *desc, struct pipelinestate *state) { return RESULT_SUCCESS; }
-            uint8_t createcomputepipelinestate(struct pipelinestate *state, size_t resourcecount, struct pipelinestateresourcedesc *resources, Shader stage) {
-                struct computepipelinestatedesc desc = (struct computepipelinestatedesc) {
-                    .resourcecount = resourcecount,
+
+            virtual uint8_t createresourcesetlayout(struct resourcesetdesc *desc, struct resourcesetlayout *layout) { return RESULT_SUCCESS; }
+            uint8_t createresourcesetlayout(struct resourcesetlayout *layout, struct resourcedesc *resources, size_t resourcecount, size_t flag) {
+                struct resourcesetdesc desc = (struct resourcesetdesc) {
                     .resources = resources,
-                    .stage = stage
+                    .resourcecount = resourcecount,
+                    .flag = flag
                 };
-                return this->createcomputepipelinestate(&desc, state);
+
+                return this->createresourcesetlayout(&desc, layout);
             }
+
+            virtual uint8_t createresourceset(struct resourcesetlayout *layout, struct resourceset *set) { return RESULT_SUCCESS; }
 
             // Create a sampler.
             virtual uint8_t createsampler(struct samplerdesc *desc, struct sampler *sampler) { return RESULT_SUCCESS; }
@@ -1005,7 +1024,13 @@ namespace ORenderer {
             // Transition texture between image layouts.
             virtual uint8_t transitionlayout(struct texture texture, size_t format, size_t state) { return RESULT_SUCCESS; }
 
-            virtual ORenderer::Stream *getimmediate(void) { return NULL; };
+            virtual ORenderer::Stream *getimmediate(void) { return NULL; }
+            virtual ORenderer::Stream *getsecondary(void) { return NULL; }
+            // Get reference to a buffer, be it a handle or a direct address (Vulkan).
+            virtual uint64_t getbufferref(struct ORenderer::buffer buffer, uint8_t latency = UINT8_MAX) { return 0; }
+
+            virtual void updateset(struct resourceset set, struct samplerbind *bind) { }
+            virtual void updateset(struct resourceset set, struct texturebind *bind) { }
 
             // submitting a stream will have it executed on GPU ASAP.
             // not to be used in the pipeline for the primary stream.
@@ -1226,7 +1251,7 @@ namespace ORenderer {
             // these few variables after this are cleared every frame
             std::vector<struct streamnibble> cmd;
             // we keep some temporary memory per-frame in order to allow us to offer persistence to data instead of letting it go out of scope, used for anything pointer related (eg. copy to temporary buffer and free later)
-            OUtils::StackAllocator tempmem = OUtils::StackAllocator(16384 * 4); // a stack allocator is suitable for our purposes as we can allocate or free from a preallocated block of memory to reduce the overhead from malloc() and free() (makes a big difference as it adds up)
+            OUtils::StackAllocator tempmem = OUtils::StackAllocator(16384); // a stack allocator is suitable for our purposes as we can allocate or free from a preallocated block of memory to reduce the overhead from malloc() and free() (makes a big difference as it adds up)
             // temporary storage for descriptor mappings per pipeline state
             std::vector<struct pipelinestateresourcemap> mappings;
             // temporary reference to the active pipeline state
@@ -1271,6 +1296,8 @@ namespace ORenderer {
             }
 
             virtual void setviewport(struct viewport viewport) { }
+
+            virtual void pushconstants(struct pipelinestate state, void *data, size_t size) { }
 
             // Set viewport for renderering.
             // void setviewport(struct viewport viewport) {
@@ -1410,6 +1437,10 @@ namespace ORenderer {
                 // this->mutex.unlock();
             }
 
+            virtual void bindset(struct resourceset set) {
+
+            }
+
             // Transition a texture between layouts.
             virtual void transitionlayout(struct texture texture, size_t format, size_t state) {
                 // ZoneScoped;
@@ -1459,7 +1490,7 @@ namespace ORenderer {
                 // } });
             }
 
-            size_t zonebegin(const char *name) {
+            virtual uint64_t zonebegin(const char *name) {
                 // ZoneScoped;
                 // size_t len = strnlen(name, 63);
                 // char *tmp = (char *)this->tempmem.alloc(len + 1); // Hard limit here to prevent a pipeline zone name from consuming all of the stack memory.
@@ -1473,8 +1504,7 @@ namespace ORenderer {
                 return 0;
             }
 
-            void zoneend(size_t zone) {
-                ZoneScoped;
+            virtual void zoneend(uint64_t zone) {
                 // this->cmd.push_back((struct streamnibble) { .type = OP_DEBUGZONEEND, .zoneend = zone });
             }
 

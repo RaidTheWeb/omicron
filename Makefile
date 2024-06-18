@@ -74,7 +74,7 @@ utils/rpak: utils/rpak.c
 
 %.spv: %.glsl
 	@printf "Compiling GLSL shader %s to Vulkan SPIRV\n" $^
-	@glslc -I src/engine/shaders -fshader-stage=$(shell python3 src/engine/shaders/getshaderstage.py $^) -o $@ $^
+	@glslc -g -I src/engine/shaders -fshader-stage=$(shell python3 src/engine/shaders/getshaderstage.py $^) -o $@ $^
 
 $(BIN_DIR)/$(OUT): $(OBJECTS)
 	@printf "%8s %-40s %s %s\n" $(CXX) $@ "$(CFLAGS)" "$(LDFLAGS)"

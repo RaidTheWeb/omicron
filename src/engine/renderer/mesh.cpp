@@ -1,5 +1,6 @@
 #include <assimp/cimport.h>
 #include <assimp/postprocess.h>
+#include <engine/renderer/bindless.hpp>
 #include <engine/renderer/mesh.hpp>
 #include <engine/resources/model.hpp>
 #include <engine/resources/texture.hpp>
@@ -66,6 +67,10 @@ namespace ORenderer {
             this->material.mr.texture, ORenderer::IMAGETYPE_2D,
             ORenderer::ASPECT_COLOUR, 0, 1, 0, 1
         ) == ORenderer::RESULT_SUCCESS, "Failed to create material texture view.\n");
+
+        this->material.base.gpuid = ORenderer::setmanager.registertexture(this->material.base.view);
+        this->material.normal.gpuid = ORenderer::setmanager.registertexture(this->material.normal.view);
+        this->material.mr.gpuid = ORenderer::setmanager.registertexture(this->material.mr.view);
         this->bounds = OMath::AABB(mesh->header.bmin, mesh->header.bmax);
     }
 

@@ -137,6 +137,7 @@
     VK_IMPORT_DEVICE_FUNC(false, vkCmdBindDescriptorSets); \
     VK_IMPORT_DEVICE_FUNC(false, vkCmdBindIndexBuffer); \
     VK_IMPORT_DEVICE_FUNC(false, vkCmdBindVertexBuffers); \
+    VK_IMPORT_DEVICE_FUNC(false, vkCmdExecuteCommands); \
     VK_IMPORT_DEVICE_FUNC(false, vkCmdClearColorImage); \
     VK_IMPORT_DEVICE_FUNC(false, vkCmdClearDepthStencilImage); \
     VK_IMPORT_DEVICE_FUNC(false, vkCmdClearAttachments); \
@@ -157,7 +158,9 @@
     VK_IMPORT_DEVICE_FUNC(false, vkInvalidateMappedMemoryRanges); \
     VK_IMPORT_DEVICE_FUNC(false, vkBindBufferMemory); \
     VK_IMPORT_DEVICE_FUNC(false, vkBindImageMemory); \
+    VK_IMPORT_DEVICE_FUNC(false, vkCmdPushConstants); \
     VK_IMPORT_DEVICE_FUNC(false, vkCmdPushDescriptorSetKHR); \
+    VK_IMPORT_DEVICE_FUNC(false, vkGetBufferDeviceAddressKHR); \
     VK_IMPORT_DEVICE_FUNC(true,  vkCreateSwapchainKHR); \
     VK_IMPORT_DEVICE_FUNC(true,  vkDestroySwapchainKHR); \
     VK_IMPORT_DEVICE_FUNC(true,  vkGetSwapchainImagesKHR); \
@@ -235,6 +238,14 @@ namespace OVulkan {
         size_t shadercount;
     };
 
+    struct resourcesetlayout {
+        VkDescriptorSetLayout layout;
+    };
+
+    struct resourceset {
+        VkDescriptorSet set;
+    };
+
     struct sampler {
         VkSampler sampler;
     };
@@ -250,6 +261,8 @@ namespace OVulkan {
         private:
             OJob::Mutex mutex;
         public:
+            VulkanStream *next; // For pooling.
+
             VkCommandBuffer cmd = VK_NULL_HANDLE;
             VulkanContext *context;
             uint8_t primary = 0;
@@ -260,6 +273,7 @@ namespace OVulkan {
             void setscissor(struct ORenderer::rect scissor);
             void beginrenderpass(struct ORenderer::renderpass renderpass, struct ORenderer::framebuffer framebuffer, struct ORenderer::rect area, struct ORenderer::clearcolourdesc clear);
 
+            void pushconstants(struct ORenderer::pipelinestate state, void *data, size_t size);
             void endrenderpass(void);
             void setpipelinestate(struct ORenderer::pipelinestate pipeline);
 
@@ -285,6 +299,8 @@ namespace OVulkan {
 
             void bindresource(size_t binding, struct ORenderer::sampledbind bind, size_t type);
 
+            void bindset(struct ORenderer::resourceset set);
+
             // Transition a texture between layouts.
             void transitionlayout(struct ORenderer::texture texture, size_t format, size_t state);
 
@@ -293,6 +309,8 @@ namespace OVulkan {
             // Submit another stream's command list to the current command list (the result will be as if the commands were submitted to this current stream)
             void submitstream(ORenderer::Stream *stream);
 
+            uint64_t zonebegin(const char *name);
+            void zoneend(uint64_t zone);
 
             void begin(void);
             void end(void);
@@ -312,9 +330,28 @@ namespace OVulkan {
 
     class VulkanContext;
 
+    #define VULKAN_POOLSIZE 64
+
+    class VulkanStreamPool {
+        private:
+            OJob::Spinlock spin;
+            VulkanContext *context;
+        public:
+            VulkanStream pool[VULKAN_POOLSIZE];
+            VkCommandBuffer cmds[VULKAN_POOLSIZE];
+            VulkanStream *freestream;
+
+            void init(VulkanContext *ctx);
+
+            VulkanStream *alloc(void);
+            void free(VulkanStream *stream);
+    };
+
     class VulkanContext : public ORenderer::RendererContext {
         public:
             TracyVkCtx tracyctx;
+
+            VulkanStreamPool streampool;
 
             VmaVulkanFunctions vmafunctions = { };
             VmaAllocator allocator = { };
@@ -328,6 +365,8 @@ namespace OVulkan {
             std::unordered_map<size_t, VulkanResource<struct renderpass>> renderpasses;
             std::unordered_map<size_t, VulkanResource<struct pipelinestate>> pipelinestates;
             std::unordered_map<size_t, VulkanResource<struct sampler>> samplers;
+            std::unordered_map<size_t, VulkanResource<struct resourcesetlayout>> layouts;
+            std::unordered_map<size_t, VulkanResource<struct resourceset>> sets;
             size_t resourcehandle = 0;
 
             ORenderer::ScratchBuffer scratchbuffers[RENDERER_MAXLATENCY];
@@ -395,6 +434,8 @@ namespace OVulkan {
             uint8_t createrenderpass(struct ORenderer::renderpassdesc *desc, struct ORenderer::renderpass *pass);
             uint8_t createpipelinestate(struct ORenderer::pipelinestatedesc *desc, struct ORenderer::pipelinestate *state);
             uint8_t createcomputepipelinestate(struct ORenderer::computepipelinestatedesc *desc, struct ORenderer::pipelinestate *state);
+            uint8_t createresourcesetlayout(struct ORenderer::resourcesetdesc *desc, struct ORenderer::resourcesetlayout *layout);
+            uint8_t createresourceset(struct ORenderer::resourcesetlayout *layout, struct ORenderer::resourceset *set);
             uint8_t createsampler(struct ORenderer::samplerdesc *desc, struct ORenderer::sampler *sampler);
 
             // XXX: Think real hard about everything, how do I want to go about it?
@@ -415,6 +456,10 @@ namespace OVulkan {
                 return ORenderer::RESULT_SUCCESS;
             }
             ORenderer::Stream *getimmediate(void);
+            ORenderer::Stream *getsecondary(void) {
+                return this->streampool.alloc();
+            }
+            uint64_t getbufferref(struct ORenderer::buffer buffer, uint8_t latency);
             uint8_t transitionlayout(struct ORenderer::texture texture, size_t format, size_t state);
 
             uint8_t submitstream(ORenderer::Stream *stream);
@@ -449,6 +494,9 @@ namespace OVulkan {
 
             VkCommandBuffer beginimmediate(void);
             void endimmediate(void);
+
+            void updateset(struct ORenderer::resourceset set, struct ORenderer::samplerbind *bind);
+            void updateset(struct ORenderer::resourceset set, struct ORenderer::texturebind *bind);
 
 
             void execute(GraphicsPipeline *pipeline, void *cam);

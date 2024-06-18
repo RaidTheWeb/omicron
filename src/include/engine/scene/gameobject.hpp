@@ -390,6 +390,7 @@ namespace OScene {
                     // Formatted like this so we'll end up setting the model either way if it *does* exist without having to do it twice
                     // This code here will basically let us load an already loaded copy of the model whenever we need it to be loaded.
                     if ((this->model = OResource::manager.get(loaded)) == RESOURCE_INVALIDHANDLE) {
+                        printf("creating new model.\n");
                         OResource::manager.create(loaded, new ORenderer::Model(this->modelpath));
                         this->model = OResource::manager.get(loaded);
                     } else {

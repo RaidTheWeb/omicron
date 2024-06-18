@@ -1,6 +1,7 @@
 #ifndef _ENGINE__RENDERER__IM_HPP
 #define _ENGINE__RENDERER__IM_HPP
 
+#include <engine/renderer/bindless.hpp>
 #include <engine/renderer/camera.hpp>
 #include <engine/renderer/iconsfontawesome.h>
 #include <engine/renderer/renderer.hpp>
@@ -159,8 +160,6 @@ namespace ORenderer {
                 // desc.depthstencil = NULL;
                 desc.depthstencil = &depthstencildesc;
                 desc.multisample = &multisample;
-                desc.resources = resources;
-                desc.resourcecount = 2;
                 ASSERT(context->createpipelinestate(&desc, &this->state) == ORenderer::RESULT_SUCCESS, "Failed to create pipeline state.\n");
             }
 
@@ -170,6 +169,7 @@ namespace ORenderer {
                 }
 
                 stream->claim();
+                stream->begin();
                 // size_t zone = stream->zonebegin("ImCanvas");
 
                 struct clearcolourdesc colourdesc = { };
@@ -205,6 +205,7 @@ namespace ORenderer {
                 stream->endrenderpass();
 
                 // stream->zoneend(zone);
+                stream->end();
                 stream->release();
             }
 
@@ -272,14 +273,14 @@ namespace ORenderer {
                     origin + s1 / 2.0f * v1 - s2 / 2.0f * v2,
                     outline);
 
-                for (size_t i = 1; i < n1; i++) {
+                for (int i = 1; i < n1; i++) {
                     const float t = ((float)i - (float)n1 / 2.0f) * s1 / (float)n1;
 
                     const glm::vec3 o1 = origin + t * v1;
                     this->line(o1 - s2 / 2.0f * v2, o1 + s2 / 2.0f * v2, colour);
                 }
 
-                for (size_t i = 1; i < n2; i++) {
+                for (int i = 1; i < n2; i++) {
                     const float t = ((float)i - (float)n2 / 2.0f) * s2 / (float)n2;
 
                     const glm::vec3 o2 = origin + t * v2;
@@ -372,6 +373,16 @@ namespace ORenderer {
                 glm::mat4 vp;
             };
 
+            struct pushconstants {
+                uint64_t vtx;
+                uint64_t idx;
+                glm::mat4 vp;
+                uint32_t sampler;
+                uint32_t texture;
+            };
+
+            struct pushconstants pcs;
+
             struct ubo ubo;
 
             const ImDrawData *drawdata = NULL;
@@ -379,10 +390,16 @@ namespace ORenderer {
             static const uint32_t idxbuffersize = 64 * 1024 * sizeof(uint32_t);
             static const size_t uploadchunksize = 65536;
 
+            uint32_t samplerid;
+
+            BindlessManager bindless;
+
             void init(void) {
                 stages[0] = Shader("shaders/imgui.vert.spv", ORenderer::SHADER_VERTEX);
                 stages[1] = Shader("shaders/imgui.frag.spv", ORenderer::SHADER_FRAGMENT);
                 ImGui::CreateContext();
+
+                bindless = BindlessManager(ORenderer::context);
 
                 ImGuiIO &io = ImGui::GetIO();
                 io.IniFilename = NULL;
@@ -423,7 +440,7 @@ namespace ORenderer {
                 memcpy(stagingmap.mapped[0], pixels, size);
                 ORenderer::context->unmapbuffer(stagingmap);
 
-                ORenderer::Stream stream;
+                ORenderer::Stream *stream = ORenderer::context->getimmediate();
                 struct ORenderer::bufferimagecopy region = { };
                 region.offset = 0;
                 region.rowlen = 0;
@@ -452,11 +469,13 @@ namespace ORenderer {
                     ORenderer::USAGE_SAMPLED | ORenderer::USAGE_DST, ORenderer::SAMPLE_X1
                 ) == ORenderer::RESULT_SUCCESS, "Failed to create font texture.\n");
 
-                stream.transitionlayout(this->font, desc.format, ORenderer::LAYOUT_TRANSFERDST);
-                stream.copybufferimage(region, staging, this->font);
-                stream.transitionlayout(this->font, desc.format, ORenderer::LAYOUT_SHADERRO);
-
-                ORenderer::context->submitstream(&stream);
+                stream->claim();
+                stream->begin();
+                stream->transitionlayout(this->font, desc.format, ORenderer::LAYOUT_TRANSFERDST);
+                stream->copybufferimage(region, staging, this->font);
+                stream->transitionlayout(this->font, desc.format, ORenderer::LAYOUT_SHADERRO);
+                stream->end();
+                stream->release();
 
                 ORenderer::context->destroybuffer(&staging);
 
@@ -477,6 +496,9 @@ namespace ORenderer {
                     this->vtxbuffersize + this->idxbuffersize
                 ) == ORenderer::RESULT_SUCCESS, "Failed to map buffer.\n");
 
+                pcs.vtx = context->getbufferref(this->ssbo);
+                pcs.idx = pcs.vtx + this->vtxbuffersize; // Simple pointer arithmetic to point to our buffer.
+
                 struct ORenderer::textureviewdesc viewdesc = { };
                 viewdesc.format = ORenderer::FORMAT_RGBA8;
                 viewdesc.texture = this->font;
@@ -496,6 +518,11 @@ namespace ORenderer {
                     &this->fontsampler, ORenderer::FILTER_NEAREST, ORenderer::FILTER_NEAREST,
                     ORenderer::ADDR_CLAMPEDGE, 0.0f, false, 1.0f
                 ) == ORenderer::RESULT_SUCCESS, "Failed to create font texture sampler.\n");
+
+                this->samplerid = this->bindless.registersampler(this->fontsampler);
+                this->pcs.sampler = this->samplerid;
+
+                this->pcs.texture = this->bindless.registertexture(this->fontview);
 
                 io.Fonts->TexID = 0;
                 io.FontDefault = this->imfont[0];
@@ -547,26 +574,20 @@ namespace ORenderer {
                 resource.stages = ORenderer::STAGE_VERTEX;
                 resource.type = ORenderer::RESOURCE_UNIFORM;
 
-                struct pipelinestateresourcedesc dataresource = { };
-                dataresource.binding = 1;
-                dataresource.stages = ORenderer::STAGE_VERTEX;
-                dataresource.type = ORenderer::RESOURCE_STORAGE;
-
-                struct pipelinestateresourcedesc idxresource = { };
-                idxresource.binding = 2;
-                idxresource.stages = ORenderer::STAGE_VERTEX;
-                idxresource.type = ORenderer::RESOURCE_STORAGE;
-
                 struct pipelinestateresourcedesc samplerresource = { };
-                samplerresource.binding = 3;
+                samplerresource.binding = 1;
                 samplerresource.stages = ORenderer::STAGE_FRAGMENT;
                 samplerresource.type = ORenderer::RESOURCE_SAMPLER;
 
-                struct pipelinestateresourcedesc resources[4];
+                struct pipelinestateresourcedesc texresource = { };
+                texresource.binding = 2;
+                texresource.stages = ORenderer::STAGE_FRAGMENT;
+                texresource.type = ORenderer::RESOURCE_TEXTURE;
+
+                struct pipelinestateresourcedesc resources[3];
                 resources[0] = resource;
-                resources[1] = dataresource;
-                resources[2] = idxresource;
-                resources[3] = samplerresource;
+                resources[1] = samplerresource;
+                resources[2] = texresource;
 
                 // Renderpass
                 struct backbufferinfo backbufferinfo = { };
@@ -633,15 +654,15 @@ namespace ORenderer {
                 pdesc.blendstate = &blendstate;
                 pdesc.rasteriser = &rasteriser;
                 pdesc.vtxinput = &vtxinput;
+                pdesc.constantssize = sizeof(struct pushconstants);
                 // pdesc.depthstencil = NULL;
                 pdesc.depthstencil = &depthstencildesc;
                 pdesc.multisample = &multisample;
-                pdesc.resources = resources;
-                pdesc.resourcecount = 4;
+                pdesc.reslayout = &this->bindless.layout;
                 ASSERT(context->createpipelinestate(&pdesc, &this->state) == ORenderer::RESULT_SUCCESS, "Failed to create pipeline state.\n");
             }
 
-            void drawcmd(uint32_t width, uint32_t height, Stream *stream, const ImDrawCmd *cmd, ImVec2 clipoff, ImVec2 clipscale, size_t idxoff, size_t vtxoff, ScratchBuffer *scratchbuffer) {
+            void drawcmd(uint32_t width, uint32_t height, Stream *stream, const ImDrawCmd *cmd, ImVec2 clipoff, ImVec2 clipscale, size_t idxoff, size_t vtxoff) {
                 if (cmd->UserCallback != NULL) {
                     return; // Don't do anything here.
                 }
@@ -656,7 +677,6 @@ namespace ORenderer {
                     // Clamp absolute.
                     cliprect.x = cliprect.x < 0.0f ? 0.0f : cliprect.x;
                     cliprect.y = cliprect.y < 0.0f ? 0.0f : cliprect.y;
-                    stream->setpipelinestate(this->state);
                     stream->setviewport((struct viewport) {
                         .x = 0,
                         .y = 0,
@@ -670,18 +690,17 @@ namespace ORenderer {
                         .height = (uint16_t)(cliprect.w - cliprect.y)
                     });
 
-                    size_t offset = scratchbuffer->write(&this->ubo, sizeof(struct ubo));
-                    struct ORenderer::bufferbind ubobind = { .buffer = scratchbuffer->buffer, .offset = offset, .range = sizeof(struct ubo) };
-                    stream->bindresource(0, ubobind, ORenderer::RESOURCE_UNIFORM);
+                    // size_t offset = scratchbuffer->write(&this->ubo, sizeof(struct ubo));
+                    // struct ORenderer::bufferbind ubobind = { .buffer = scratchbuffer->buffer, .offset = offset, .range = sizeof(struct ubo) };
+                    // stream->bindresource(0, ubobind, ORenderer::RESOURCE_UNIFORM);;
 
-                    struct ORenderer::bufferbind vtxbind = { .buffer = this->ssbo, .offset = 0, .range = this->vtxbuffersize };
-                    stream->bindresource(1, vtxbind, ORenderer::RESOURCE_STORAGE);
-                    struct ORenderer::bufferbind idxbind = { .buffer = this->ssbo, .offset = this->vtxbuffersize, .range = this->idxbuffersize };
-                    stream->bindresource(2, idxbind, ORenderer::RESOURCE_STORAGE);
+                    // struct ORenderer::sampledbind bind = { .sampler = this->fontsampler, .view = this->fontview, .layout = ORenderer::LAYOUT_SHADERRO };
+                    // stream->bindresource(1, bind, ORenderer::RESOURCE_SAMPLER);
+                    // stream->bindresource(2, bind, ORenderer::RESOURCE_TEXTURE);
 
-                    struct ORenderer::sampledbind bind = { .sampler = this->fontsampler, .view = this->fontview, .layout = ORenderer::LAYOUT_SHADERRO };
-                    stream->bindresource(3, bind, ORenderer::RESOURCE_SAMPLER);
-                    stream->commitresources();
+                    // push our constants for the shader
+                    stream->pushconstants(this->state, &this->pcs, sizeof(struct pushconstants));
+                    // stream->commitresources();
 
                     stream->draw(cmd->ElemCount, 1, cmd->IdxOffset + idxoff, cmd->VtxOffset + vtxoff);
                 }
@@ -689,7 +708,8 @@ namespace ORenderer {
             }
 
             void fillstream(Stream *stream) {
-                stream->claim();
+                // stream->claim();
+                // stream->begin();
                 // size_t zone = stream->zonebegin("ImGui");
 
                 struct clearcolourdesc colourdesc = { };
@@ -713,13 +733,16 @@ namespace ORenderer {
                 ImVec2 clipoff = drawdata->DisplayPos;
                 ImVec2 clipscale = drawdata->FramebufferScale;
 
+                stream->setpipelinestate(this->state);
+                stream->bindset(this->bindless.set);
+
                 size_t vtxoff = 0;
                 size_t idxoff = 0;
-                for (size_t i = 0; i < drawdata->CmdListsCount; i++) {
+                for (int i = 0; i < drawdata->CmdListsCount; i++) {
                     const ImDrawList *cmdlist = drawdata->CmdLists[i];
-                    for (size_t j = 0; j < cmdlist->CmdBuffer.Size; j++) {
+                    for (int j = 0; j < cmdlist->CmdBuffer.Size; j++) {
                         const ImDrawCmd *cmd = &cmdlist->CmdBuffer[j];
-                        this->drawcmd(1280, 720, stream, cmd, clipoff, clipscale, idxoff, vtxoff, scratchbuffer);
+                        this->drawcmd(1280, 720, stream, cmd, clipoff, clipscale, idxoff, vtxoff);
                     }
                     idxoff += cmdlist->IdxBuffer.Size;
                     vtxoff += cmdlist->VtxBuffer.Size;
@@ -728,7 +751,8 @@ namespace ORenderer {
                 stream->endrenderpass();
 
                 // stream->zoneend(zone);
-                stream->release();
+                // stream->end();
+                // stream->release();
             }
 
             void updatebuffer(void) {
@@ -743,6 +767,7 @@ namespace ORenderer {
 
                 const glm::mat4 proj = glm::ortho(left, right, bottom, top); // Create orthographic projection from this.
                 this->ubo.vp = proj; // Copy to ubo.
+                this->pcs.vp = proj;
 
 
                 // Same loop as before but this time we upload vertex and index differently.
@@ -750,13 +775,13 @@ namespace ORenderer {
                 uint32_t *idx = (uint32_t *)((uint8_t *)this->ssbomap.mapped[context->getlatency()] + this->vtxbuffersize);
 
                 // One loop for both indices and vertices since we need not worry about sequential writes here.
-                for (size_t i = 0; i < drawdata->CmdListsCount; i++) {
+                for (int i = 0; i < drawdata->CmdListsCount; i++) {
                     const ImDrawList *cmdlist = drawdata->CmdLists[i];
                     // Copy vertices out.
                     memcpy(vtx, cmdlist->VtxBuffer.Data, cmdlist->VtxBuffer.Size * sizeof(ImDrawVert));
                     // Copy indices out.
                     const uint16_t *src = cmdlist->IdxBuffer.Data;
-                    for (size_t j = 0; j < cmdlist->IdxBuffer.Size; j++) {
+                    for (int j = 0; j < cmdlist->IdxBuffer.Size; j++) {
                         *idx++ = (uint32_t)*src++;
                     }
 

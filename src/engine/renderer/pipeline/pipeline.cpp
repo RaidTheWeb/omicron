@@ -1,5 +1,6 @@
 #include <engine/engine.hpp>
 
+#include <engine/renderer/bindless.hpp>
 #include <engine/renderer/pipeline/pbrpipeline.hpp>
 #include <engine/renderer/renderer.hpp>
 #include <engine/renderer/im3d.hpp>
@@ -20,14 +21,17 @@ struct ORenderer::buffermap ubomap = { };
 struct ORenderer::texture outtex = { };
 struct ORenderer::textureview outtexview = { };
 struct ORenderer::sampler outsampler = { };
+uint32_t samplerid;
 struct ORenderer::sampler outsampler2 = { };
 struct ORenderer::sampler outsampler3 = { };
 ORenderer::Model model;
 
 struct ubo {
+    uint32_t sampler;
+    uint32_t base;
+    uint32_t normal;
+    uint32_t mrid;
     glm::mat4 model;
-    glm::mat4 view;
-    glm::mat4 proj;
     glm::mat4 viewproj;
     glm::vec3 campos;
 };
@@ -52,7 +56,7 @@ struct im3dubo {
     glm::vec2 viewport;
 };
 
-struct ORenderer::Shader im3dpt[2] = { };
+ORenderer::Shader im3dpt[2] = { };
 struct ORenderer::pipelinestate im3dptstate;
 struct ORenderer::buffer im3dubo;
 struct ORenderer::buffermap im3dubomap;
@@ -65,138 +69,6 @@ int64_t lastframetimestamp = 0;
 #include <engine/renderer/im.hpp>
 ORenderer::ImCanvas canvas;
 
-void setupim(void) {
-    canvas.init();
-
-    // Upload raw quad to GPU for later manipulation.
-    ASSERT(ORenderer::context->createbuffer(
-        &im3dvtxbuffer, sizeof(im3dvtx),
-        ORenderer::BUFFER_VERTEX | ORenderer::BUFFER_TRANSFERDST,
-        ORenderer::MEMPROP_GPULOCAL, 0
-    ) == ORenderer::RESULT_SUCCESS, "Failed to create buffer.\n");
-
-    ORenderer::uploadtobuffer(im3dvtxbuffer, sizeof(im3dvtx), im3dvtx, 0);
-
-    im3dlayout.stride = sizeof(glm::vec4);
-    im3dlayout.binding = 0;
-    im3dlayout.attribcount = 1;
-    im3dlayout.attribs[0].offset = 0;
-    im3dlayout.attribs[0].attribtype = ORenderer::VTXATTRIB_VEC4;
-
-    // Create and map the uniform buffer
-    struct ORenderer::bufferdesc ubodesc = { };
-    ubodesc.size = sizeof(struct im3dubo);
-    ubodesc.memprops = ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPUCOHERENT | ORenderer::MEMPROP_CPUSEQUENTIALWRITE;
-    ubodesc.usage = ORenderer::BUFFER_UNIFORM;
-    ubodesc.flags = ORenderer::BUFFERFLAG_PERFRAME;
-    ASSERT(ORenderer::context->createbuffer(
-        &im3dubo, sizeof(struct im3dubo), ORenderer::BUFFER_UNIFORM,
-        ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPUCOHERENT | ORenderer::MEMPROP_CPUSEQUENTIALWRITE,
-        ORenderer::BUFFERFLAG_PERFRAME
-    ) == ORenderer::RESULT_SUCCESS, "Failed to create buffer.\n");
-
-    ASSERT(ORenderer::context->mapbuffer(
-        &im3dubomap, im3dubo, 0,
-        sizeof(struct im3dubo)
-    ) == ORenderer::RESULT_SUCCESS, "Failed to map uniform buffer.\n");
-
-    // Do it again but for the vertex data block (inputs from im3d).
-    ubodesc.size = 64 * 1024; // minimum the vulkan spec claims to offer for a single buffer.
-    ubodesc.memprops = ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPUCOHERENT | ORenderer::MEMPROP_CPUSEQUENTIALWRITE;
-    ubodesc.usage = ORenderer::BUFFER_UNIFORM;
-    ubodesc.flags = ORenderer::BUFFERFLAG_PERFRAME; // Unfortunately so, I'd rather it wasn't the case but alas.
-    ASSERT(ORenderer::context->createbuffer(
-        &im3dvtxdata, 64 * 1024, ORenderer::BUFFER_UNIFORM,
-        ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPUCOHERENT | ORenderer::MEMPROP_CPUSEQUENTIALWRITE,
-        ORenderer::BUFFERFLAG_PERFRAME
-    ) == ORenderer::RESULT_SUCCESS, "Failed to create buffer.\n");
-
-    ASSERT(ORenderer::context->mapbuffer(&im3dvtxdatamap, im3dvtxdata, 0, 64 * 1024) == ORenderer::RESULT_SUCCESS, "Failed to map uniform buffer.\n");
-
-    struct ORenderer::blendattachmentdesc attachment = { };
-    attachment.writemask = ORenderer::WRITE_RGBA;
-    attachment.blend = true;
-    attachment.colourblendop = ORenderer::BLENDOP_ADD;
-    attachment.alphablendop = ORenderer::BLENDOP_ADD;
-    attachment.srccolourblendfactor = ORenderer::BLENDFACTOR_SRCALPHA; // blend colour based on alpha
-    attachment.dstalphablendfactor = ORenderer::BLENDFACTOR_ONEMINUSSRCALPHA; // remove alpha value from src
-    attachment.dstalphablendfactor = ORenderer::BLENDFACTOR_ZERO; // contribute nothing
-    attachment.srcalphablendfactor = ORenderer::BLENDFACTOR_ONE; // contribute all
-
-    struct ORenderer::blendstatedesc blendstate = { };
-    blendstate.logicopenable = false;
-    blendstate.logicop = ORenderer::LOGICOP_COPY;
-    blendstate.attachmentcount = 1;
-    blendstate.attachments = &attachment;
-
-    struct ORenderer::vtxbinddesc bind = { };
-    bind.rate = ORenderer::RATE_VERTEX;
-    bind.layout = im3dlayout;
-
-    struct ORenderer::vtxinputdesc vtxinput = { };
-    vtxinput.bindcount = 1;
-    vtxinput.binddescs = &bind;
-
-    struct ORenderer::rasteriserdesc rasteriser = { };
-    rasteriser.depthclamp = false;
-    rasteriser.rasteriserdiscard = false;
-    rasteriser.polygonmode = ORenderer::POLYGON_FILL;
-    rasteriser.cullmode = ORenderer::CULL_NONE;
-    rasteriser.frontface = ORenderer::FRONT_CCW;
-    rasteriser.depthbias = false;
-    rasteriser.depthbiasconstant = 0.0f;
-    rasteriser.depthclamp = 0.0f;
-    rasteriser.depthbiasslope = 0.0f;
-
-    struct ORenderer::multisampledesc multisample = { };
-    multisample.sampleshading = false;
-    multisample.samples = ORenderer::SAMPLE_X1;
-    multisample.minsampleshading = 1.0f;
-    multisample.samplemask = NULL;
-    multisample.alphatocoverage = false;
-    multisample.alphatoone = false;
-
-    struct ORenderer::pipelinestateresourcedesc resource = { };
-    resource.binding = 0;
-    resource.stages = ORenderer::STAGE_VERTEX;
-    resource.type = ORenderer::RESOURCE_UNIFORM;
-
-    struct ORenderer::pipelinestateresourcedesc dataresource = { };
-    dataresource.binding = 1;
-    dataresource.stages = ORenderer::STAGE_VERTEX;
-    dataresource.type = ORenderer::RESOURCE_UNIFORM;
-
-    struct ORenderer::depthstencilstatedesc depthstencildesc = { };
-    depthstencildesc.stencil = false;
-    depthstencildesc.depthtest = false;
-    depthstencildesc.maxdepth = 1.0f;
-    depthstencildesc.mindepth = 0.0f;
-    depthstencildesc.depthwrite = false;
-    depthstencildesc.depthboundstest = false;
-    depthstencildesc.depthcompareop = ORenderer::CMPOP_LESS;
-
-    struct ORenderer::pipelinestateresourcedesc resources[2];
-    resources[0] = resource;
-    resources[1] = dataresource;
-
-    struct ORenderer::pipelinestatedesc desc = { };
-    desc.stagecount = 2;
-    desc.stages = im3dpt;
-    desc.tesspoints = 4;
-    desc.scissorcount = 1;
-    desc.viewportcount = 1;
-    desc.primtopology = ORenderer::PRIMTOPOLOGY_TRISTRIP;
-    desc.renderpass = &rpass;
-    desc.blendstate = &blendstate;
-    desc.rasteriser = &rasteriser;
-    desc.vtxinput = &vtxinput;
-    desc.depthstencil = &depthstencildesc;
-    desc.multisample = &multisample;
-    desc.resources = resources;
-    desc.resourcecount = 2;
-    ASSERT(ORenderer::context->createpipelinestate(&desc, &im3dptstate) == ORenderer::RESULT_SUCCESS, "Failed to create pipeline state.\n");
-}
-
 #include <engine/renderer/backend/vulkan.hpp>
 
 ORenderer::ImGuiRenderer imr;
@@ -205,6 +77,7 @@ void PBRPipeline::init(void) {
     ORenderer::Shader stages[2] = { ORenderer::Shader("shaders/test.vert.spv", ORenderer::SHADER_VERTEX), ORenderer::Shader("shaders/test.frag.spv", ORenderer::SHADER_FRAGMENT) };
     im3dpt[0] = ORenderer::Shader("shaders/im3dpt.vert.spv", ORenderer::SHADER_VERTEX);
     im3dpt[1] = ORenderer::Shader("shaders/im3dpt.frag.spv", ORenderer::SHADER_FRAGMENT);
+    // bindless = ORenderer::BindlessManager(ORenderer::context);
 
     struct ORenderer::blendattachmentdesc attachment = { };
     attachment.writemask = ORenderer::WRITE_RGBA;
@@ -254,7 +127,7 @@ void PBRPipeline::init(void) {
     rtattachment.stencilloadop = ORenderer::LOADOP_DONTCARE;
     rtattachment.stencilstoreop = ORenderer::STOREOP_DONTCARE;
     rtattachment.initiallayout = ORenderer::LAYOUT_UNDEFINED;
-    rtattachment.finallayout = ORenderer::LAYOUT_BACKBUFFER; // Shift to colour attachment for our next pass.
+    rtattachment.finallayout = ORenderer::LAYOUT_COLOURATTACHMENT; // Shift to colour attachment for our next pass.
 
     struct ORenderer::rtattachmentdesc depthattachment = { };
     depthattachment.format = ORenderer::FORMAT_D32F;
@@ -276,25 +149,68 @@ void PBRPipeline::init(void) {
 
     ASSERT(ORenderer::context->createrenderpass(&rpass, 2, attachments, 1, &colourref, &depthref) == ORenderer::RESULT_SUCCESS, "Failed to create renderpass.\n");
 
-    struct ORenderer::pipelinestateresourcedesc resource = { };
-    resource.binding = 0;
-    resource.stages = ORenderer::STAGE_VERTEX | ORenderer::STAGE_FRAGMENT;
-    resource.type = ORenderer::RESOURCE_UNIFORM;
+    // struct ORenderer::pipelinestateresourcedesc resource = { };
+    // resource.binding = 0;
+    // resource.stages = ORenderer::STAGE_VERTEX | ORenderer::STAGE_FRAGMENT;
+    // resource.type = ORenderer::RESOURCE_UNIFORM;
+    //
+    // struct ORenderer::pipelinestateresourcedesc samplerresource = { };
+    // samplerresource.binding = 1;
+    // samplerresource.stages = ORenderer::STAGE_FRAGMENT;
+    // samplerresource.type = ORenderer::RESOURCE_SAMPLER;
+    //
+    // struct ORenderer::pipelinestateresourcedesc texresource = { };
+    // samplerresource.binding = 1;
+    // samplerresource.stages = ORenderer::STAGE_FRAGMENT;
+    // samplerresource.type = ORenderer::RESOURCE_SAMPLER;
+    //
+    // struct ORenderer::pipelinestateresourcedesc samplerresource2 = { };
+    // samplerresource2.binding = 3;
+    // samplerresource2.stages = ORenderer::STAGE_FRAGMENT;
+    // samplerresource2.type = ORenderer::RESOURCE_SAMPLER;
+    //
+    // struct ORenderer::pipelinestateresourcedesc samplerresource3 = { };
+    // samplerresource3.binding = 5;
+    // samplerresource3.stages = ORenderer::STAGE_FRAGMENT;
+    // samplerresource3.type = ORenderer::RESOURCE_SAMPLER;
 
-    struct ORenderer::pipelinestateresourcedesc samplerresource = { };
-    samplerresource.binding = 1;
-    samplerresource.stages = ORenderer::STAGE_FRAGMENT;
-    samplerresource.type = ORenderer::RESOURCE_SAMPLER;
-
-    struct ORenderer::pipelinestateresourcedesc samplerresource2 = { };
-    samplerresource2.binding = 2;
-    samplerresource2.stages = ORenderer::STAGE_FRAGMENT;
-    samplerresource2.type = ORenderer::RESOURCE_SAMPLER;
-
-    struct ORenderer::pipelinestateresourcedesc samplerresource3 = { };
-    samplerresource3.binding = 3;
-    samplerresource3.stages = ORenderer::STAGE_FRAGMENT;
-    samplerresource3.type = ORenderer::RESOURCE_SAMPLER;
+    struct ORenderer::pipelinestateresourcedesc resources[] = {
+        (struct ORenderer::pipelinestateresourcedesc) {
+            .binding = 0,
+            .stages = ORenderer::STAGE_ALL,
+            .type = ORenderer::RESOURCE_UNIFORM
+        },
+        (struct ORenderer::pipelinestateresourcedesc) {
+            .binding = 1,
+            .stages = ORenderer::STAGE_ALL,
+            .type = ORenderer::RESOURCE_SAMPLER
+        },
+        (struct ORenderer::pipelinestateresourcedesc) {
+            .binding = 2,
+            .stages = ORenderer::STAGE_ALL,
+            .type = ORenderer::RESOURCE_TEXTURE
+        },
+        (struct ORenderer::pipelinestateresourcedesc) {
+            .binding = 3,
+            .stages = ORenderer::STAGE_ALL,
+            .type = ORenderer::RESOURCE_SAMPLER
+        },
+        (struct ORenderer::pipelinestateresourcedesc) {
+            .binding = 4,
+            .stages = ORenderer::STAGE_ALL,
+            .type = ORenderer::RESOURCE_TEXTURE
+        },
+        (struct ORenderer::pipelinestateresourcedesc) {
+            .binding = 5,
+            .stages = ORenderer::STAGE_ALL,
+            .type = ORenderer::RESOURCE_SAMPLER
+        },
+        (struct ORenderer::pipelinestateresourcedesc) {
+            .binding = 6,
+            .stages = ORenderer::STAGE_ALL,
+            .type = ORenderer::RESOURCE_TEXTURE
+        }
+    };
 
     struct ORenderer::depthstencilstatedesc depthstencildesc = { };
     depthstencildesc.stencil = false;
@@ -305,11 +221,11 @@ void PBRPipeline::init(void) {
     depthstencildesc.depthboundstest = false;
     depthstencildesc.depthcompareop = ORenderer::CMPOP_LESS;
 
-    struct ORenderer::pipelinestateresourcedesc resources[4];
-    resources[0] = resource;
-    resources[1] = samplerresource;
-    resources[2] = samplerresource2;
-    resources[3] = samplerresource3;
+    // struct ORenderer::pipelinestateresourcedesc resources[4];
+    // resources[0] = resource;
+    // resources[1] = samplerresource;
+    // resources[2] = samplerresource2;
+    // resources[3] = samplerresource3;
 
     struct ORenderer::pipelinestatedesc desc = { };
     desc.stagecount = 2;
@@ -324,8 +240,9 @@ void PBRPipeline::init(void) {
     desc.vtxinput = &vtxinput;
     desc.depthstencil = &depthstencildesc;
     desc.multisample = &multisample;
-    desc.resources = resources;
-    desc.resourcecount = 4;
+    desc.constantssize = sizeof(struct ubo);
+    desc.reslayout = &ORenderer::setmanager.layout;
+    // desc.resourcecount = sizeof(resources) / sizeof(resources[0]);
 
     ASSERT(ORenderer::context->createpipelinestate(&desc, &state) == ORenderer::RESULT_SUCCESS, "Failed to create pipeline state.\n");
 
@@ -347,20 +264,18 @@ void PBRPipeline::init(void) {
         ORenderer::BUFFERFLAG_PERFRAME
     ) == ORenderer::RESULT_SUCCESS, "Failed to create buffer.\n");
 
-    ASSERT(ORenderer::context->mapbuffer(&ubomap, ubo, sizeof(struct ubo), 0) == ORenderer::RESULT_SUCCESS, "Failed to map uniform buffer.\n");
+    ASSERT(ORenderer::context->mapbuffer(&ubomap, ubo, 0, sizeof(struct ubo)) == ORenderer::RESULT_SUCCESS, "Failed to map uniform buffer.\n");
 
     ORenderer::context->createbackbuffer(rpass, &depthtexview);
     renderrect.width = engine_engine->winsize.x;
     renderrect.height = engine_engine->winsize.y;
 
     ASSERT(ORenderer::context->createsampler(&outsampler, ORenderer::FILTER_NEAREST, ORenderer::FILTER_NEAREST, ORenderer::ADDR_CLAMPEDGE, 0.0f, false, 1.0f) == ORenderer::RESULT_SUCCESS, "Failed to create sampler.\n");
-    ASSERT(ORenderer::context->createsampler(&outsampler2, ORenderer::FILTER_NEAREST, ORenderer::FILTER_NEAREST, ORenderer::ADDR_CLAMPEDGE, 0.0f, false, 1.0f) == ORenderer::RESULT_SUCCESS, "Failed to create sampler.\n");
-    ASSERT(ORenderer::context->createsampler(&outsampler3, ORenderer::FILTER_NEAREST, ORenderer::FILTER_NEAREST, ORenderer::ADDR_CLAMPEDGE, 0.0f, false, 1.0f) == ORenderer::RESULT_SUCCESS, "Failed to create sampler.\n");
 
     stages[0].destroy();
     stages[1].destroy();
 
-    setupim();
+    samplerid = ORenderer::setmanager.registersampler(outsampler);
     imr.init();
 }
 
@@ -376,7 +291,6 @@ void PBRPipeline::update(uint64_t flags) {
 #include <engine/scene/scene.hpp>
 
 OScene::Scene scene;
-ORenderer::Stream imstream = ORenderer::Stream();
 
 void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
     ZoneScopedN("Pipeline Execute");
@@ -408,6 +322,8 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
 
 
     stream->setpipelinestate(state); // Only ever set the state when we need to. Ideally an UBER shader should be used as we can afford the branching costs in exchange for not having to worry about materials.
+    stream->bindset(ORenderer::setmanager.set);
+
     stream->setviewport(viewport);
     stream->setscissor((struct ORenderer::rect) { .x = 0, .y = 0, .width = renderrect.width, .height = renderrect.height });
 
@@ -441,53 +357,43 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
     ORenderer::ScratchBuffer *scratchbuffer;
     ASSERT(ORenderer::context->requestscratchbuffer(&scratchbuffer) == ORenderer::RESULT_SUCCESS, "Failed to request scratchbuffer.\n");
     if (res != NULL) {
+        printf("rendering culled objects.\n");
         ZoneScopedN("Object Render");
 
-        // for (auto it = scene.objects.begin(); it != scene.objects.end(); it++) {
         while (res != NULL) {
             for (size_t i = 0; i < res->header.count; i++) {
                 OUtils::Handle<OScene::GameObject> obj = res->objects[i];
 
                 if ((!(obj->flags & OScene::GameObject::IS_INVISIBLE)) && obj->hascomponent(OUtils::STRINGID("ModelInstance"))) {
                     ZoneScopedN("Individual");
-                    TracyMessageL("begin single.");
                     visibleobjects++;
                     OUtils::Handle<OScene::ModelInstance> model = obj->getcomponent(OUtils::STRINGID("ModelInstance"))->gethandle<OScene::ModelInstance>();
 
                     model->model->claim(); // XXX: Claim access.
 
                     const float time = glfwGetTime();
-                    TracyMessageL("set these up.");
-
-                    // data.model = glm::rotate(obj->getglobalmatrix(), time * glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // rotate Z
-                    data.model = obj->getglobalmatrix();
-                    data.view = camera->getview();
-                    data.proj = camera->getproj();
-                    data.viewproj = camera->getviewproj(); // precalculated combination (so we don't have to do this calculation per fragment, this could be extended still by precalculating the mvp)
-                    data.campos = camera->pos;
-
-                    TracyMessageL("all good.");
-
-                    size_t offset = scratchbuffer->write(&data, sizeof(struct ubo));
 
                     for (size_t i = 0; i < model->model->as<ORenderer::Model>()->meshes.size(); i++) {
-                    struct ORenderer::bufferbind ubobind = { .buffer = scratchbuffer->buffer, .offset = offset, .range = sizeof(struct ubo) };
-                    stream->bindresource(0, ubobind, ORenderer::RESOURCE_UNIFORM);
-                    struct ORenderer::sampledbind bind = { .sampler = outsampler, .view = model->model->as<ORenderer::Model>()->meshes[i].material.base.view, .layout = ORenderer::LAYOUT_SHADERRO };
-                    stream->bindresource(1, bind, ORenderer::RESOURCE_SAMPLER);
-                    struct ORenderer::sampledbind bind2 = { .sampler = outsampler2, .view = model->model->as<ORenderer::Model>()->meshes[i].material.normal.view, .layout = ORenderer::LAYOUT_SHADERRO };
-                    stream->bindresource(2, bind2, ORenderer::RESOURCE_SAMPLER);
-                    struct ORenderer::sampledbind bind3 = { .sampler = outsampler3, .view = model->model->as<ORenderer::Model>()->meshes[i].material.mr.view, .layout = ORenderer::LAYOUT_SHADERRO };
-                    stream->bindresource(3, bind3, ORenderer::RESOURCE_SAMPLER);
-                    stream->commitresources();
+                        data.sampler = samplerid;
+                        // XXX: Compress into material ID system.
+                        data.base = model->model->as<ORenderer::Model>()->meshes[i].material.base.gpuid;
+                        data.normal = model->model->as<ORenderer::Model>()->meshes[i].material.normal.gpuid;
+                        data.mrid = model->model->as<ORenderer::Model>()->meshes[i].material.mr.gpuid;
+                        data.model = obj->getglobalmatrix();
+                        data.viewproj = camera->getviewproj(); // precalculated combination (so we don't have to do this calculation per fragment, this could be extended still by precalculating the mvp)
+                        data.campos = camera->pos;
 
-                    size_t offsets = 0;
-                    stream->setvtxbuffers(&model->model->as<ORenderer::Model>()->meshes[i].vertexbuffer, &offsets, 0, 1);
-                    stream->setidxbuffer(model->model->as<ORenderer::Model>()->meshes[i].indexbuffer, 0, false);
-                    stream->drawindexed(model->model->as<ORenderer::Model>()->meshes[i].indices.size(), 1, 0, 0, 0);
-                    }
-                    model->model->release(); // XXX: Relinquish our claim on resource access.
-                    TracyMessageL("finish single.");
+                        {
+                            ZoneScopedN("Push Constants");
+                            stream->pushconstants(state, &data, sizeof(struct ubo));
+                        }
+
+                        stream->setvtxbuffer(model->model->as<ORenderer::Model>()->meshes[i].vertexbuffer, 0);
+                        stream->setidxbuffer(model->model->as<ORenderer::Model>()->meshes[i].indexbuffer, 0, false);
+                        stream->drawindexed(model->model->as<ORenderer::Model>()->meshes[i].indices.size(), 1, 0, 0, 0);
+                        }
+                        model->model->release(); // XXX: Relinquish our claim on resource access.
+                        TracyMessageL("finish single.");
                 }
             }
             res = res->header.next;
@@ -558,6 +464,8 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
     stream->zoneend(zone);
     stream->endrenderpass();
 
+    // printf("canvas.\n");
+
     {
         ZoneScopedN("Canvas Draw");
         // canvas.updateuniform(camera->getviewproj(), glfwGetTime());
@@ -603,8 +511,6 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
 
     // canvas.updatebuffer();
 
-    imstream.flushcmd();
-
     if (canvas.vertices.size()) {
         // canvas.fillstream(&imstream);
     }
@@ -617,6 +523,7 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
     // }
 
     {
+        // printf("imgui.\n");
         ZoneScopedN("ImGui Steps");
         ImGuiIO &io = ImGui::GetIO();
         io.DisplaySize = ImVec2((float)renderrect.width, (float)renderrect.height);
@@ -631,10 +538,14 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
         ImGui::Render();
 
         zone = stream->zonebegin("imgui");
+        imr.updatebuffer();
+        // ORenderer::Stream *imstream = ORenderer::context->getsecondary();
+        imr.fillstream(stream);
         // imr.updatebuffer();
         // imr.fillstream(&imstream);
-        // stream->submitstream(&imstream);
+        // stream->submitstream(imstream);
         stream->zoneend(zone);
+        // printf("done imgui.\n");
     }
 
     // struct ORenderer::texture texture;

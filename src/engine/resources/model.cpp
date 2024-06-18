@@ -257,8 +257,6 @@ namespace OResource {
 
         ASSERT(fwrite(&header, sizeof(struct header), 1, f), "Failed to write OMod model header.\n");
         for (size_t i = 0; i < header.nummaterial; i++) {
-            printf("%s\n", materials[i].mr);
-            // strcpy(materials[i].base, "misc/out2.ktx2");
             ASSERT(fwrite(&materials[i], sizeof(struct material), 1, f), "Failed to write OMod material.\n");
         }
 

@@ -1,4 +1,5 @@
 #include <engine/renderer/backend/vulkan.hpp>
+#include <engine/renderer/bindless.hpp>
 #include <engine/utils/print.hpp>
 
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
@@ -50,12 +51,14 @@ namespace OVulkan {
 #endif
 #ifdef OMICRON_DEBUG
         { VK_EXT_DEBUG_UTILS_EXTENSION_NAME, false, true, false },
+        // { VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME, false, true, false }
 #endif
     };
 
     static struct extension devextensions[] = {
         // TODO: Consider bindless rendering architecture
-        // { VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME, false, false, false },
+        { VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME, false, false, false },
+        { VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, false, false, false },
         { VK_KHR_SWAPCHAIN_EXTENSION_NAME, false, false, false },
         { VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME, false, false, false },
         { VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME, false, false, false }
@@ -346,8 +349,9 @@ namespace OVulkan {
     };
 
     static VkDescriptorType descriptortypetable[] = {
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // RENDERER_RESOURCESAMPLER
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, // RENDERER_RESOURCESTORAGEIMAGE
+        VK_DESCRIPTOR_TYPE_SAMPLER, // RENDERER_RESOURCESAMPLER
+        VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, // RENDERER_RESOURCETEXTURE
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, // RENDERER_RESOURCESTORAGETEXTURE
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // RENDERER_RESOURCEUNIFORM
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER // RENDERER_RESOURCESTORAGE
     };
@@ -609,11 +613,10 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::createtexture(struct ORenderer::texturedesc *desc, struct ORenderer::texture *texture) {
-        if (desc->format >= ORenderer::FORMAT_COUNT) {
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->type >= ORenderer::IMAGETYPE_COUNT) {
-            return ORenderer::RESULT_INVALIDARG;
-        }
+        ASSERT(desc != NULL, "Description must not be NULL.\n");
+        ASSERT(texture != NULL, "Texture must not be NULL.\n");
+        ASSERT(desc->format < ORenderer::FORMAT_COUNT, "Invalid texture format.\n");
+        ASSERT(desc->type < ORenderer::IMAGETYPE_COUNT, "Invalid texture type.\n");
 
         VkImageUsageFlags usage =
             (desc->usage & ORenderer::USAGE_COLOUR ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0) |
@@ -672,9 +675,9 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::createbuffer(struct ORenderer::bufferdesc *desc, struct ORenderer::buffer *buffer) {
-        if (desc->size <= 0) {
-            return ORenderer::RESULT_INVALIDARG;
-        }
+        ASSERT(desc != NULL, "Description must not be NULL.\n");
+        ASSERT(buffer != NULL, "Buffer must not be NULL.\n");
+        ASSERT(desc->size > 0, "Invalid buffer size.\n");
 
         VkBufferCreateInfo buffercreate = { };
         buffercreate.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -688,7 +691,7 @@ namespace OVulkan {
             (desc->usage & ORenderer::BUFFER_INDIRECT ? VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT : 0) |
             (desc->usage & ORenderer::BUFFER_TRANSFERDST ? VK_BUFFER_USAGE_TRANSFER_DST_BIT : 0) |
             (desc->usage & ORenderer::BUFFER_TRANSFERSRC ? VK_BUFFER_USAGE_TRANSFER_SRC_BIT : 0) |
-            0;
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT; // We want to be able to use it for this regardless.
         buffercreate.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         VmaAllocationCreateInfo allocinfo = { };
@@ -742,17 +745,13 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::createframebuffer(struct ORenderer::framebufferdesc *desc, struct ORenderer::framebuffer *framebuffer) {
-        if (desc->attachmentcount <= 0) {
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->attachments == NULL) {
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->width <= 0) {
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->height <= 0) {
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->layers <= 0) {
-            return ORenderer::RESULT_INVALIDARG;
-        }
+        ASSERT(desc != NULL, "Description must not be NULL.\n");
+        ASSERT(framebuffer != NULL, "framebuffer must not be NULL.\n");
+        ASSERT(desc->attachmentcount > 0, "Invalid number of attachments.\n");
+        ASSERT(desc->attachments != NULL, "Invalid attachments.\n");
+        ASSERT(desc->width > 0, "Invalid framebuffer width.\n");
+        ASSERT(desc->height > 0, "Invalid framebuffer height.\n");
+        ASSERT(desc->layers > 0, "Invalid framebuffer layer count.\n");
 
         VkImageView *attachments = (VkImageView *)malloc(sizeof(VkImageView) * desc->attachmentcount);
         ASSERT(attachments != NULL, "Failed to allocate memory for Vulkan framebuffer attachments.\n");
@@ -784,22 +783,15 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::createrenderpass(struct ORenderer::renderpassdesc *desc, struct ORenderer::renderpass *pass) {
-
-        if (desc->attachmentcount <= 0) {
-            printf("too few attachments");
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->colourrefcount <= 0 && desc->depthref == NULL) { // no colour references and no depth references!!!!!
-            printf("too few refs\n");
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->attachments == NULL) {
-            printf("no attachments.\n");
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->colourrefs == NULL && desc->colourrefcount > 0) {
-            printf("no refs but told there is.\n");
-            return ORenderer::RESULT_INVALIDARG;
+        ASSERT(desc != NULL, "Description must not be NULL.\n");
+        ASSERT(pass != NULL, "Pass must not be NULL.\n");
+        ASSERT(desc->attachmentcount > 0, "Invalid number of attachments.\n");
+        ASSERT(desc->attachments != NULL, "Invalid attachments.\n");
+        ASSERT(desc->depthref == NULL || desc->colourrefcount > 0, "No depth reference yet colour reference count is invalid.\n");
+        if (desc->colourrefs == NULL && desc->colourrefcount > 0) {
+            ASSERT(false, "Told there are colour references despite having none specified.\n");
         }
 
-        size_t attachmentid = 0;
         VkAttachmentReference *colourrefs = (VkAttachmentReference *)malloc(sizeof(VkAttachmentReference) * (desc->colourrefcount ? desc->colourrefcount : 1));
         ASSERT(colourrefs != NULL, "Failed to allocate memory for Vulkan renderpass colour references.\n");
         memset(colourrefs, 0, sizeof(VkAttachmentReference) * (desc->colourrefcount ? desc->colourrefcount : 1));
@@ -891,13 +883,13 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::createcomputepipelinestate(struct ORenderer::computepipelinestatedesc *desc, struct ORenderer::pipelinestate *state) {
+        ASSERT(desc != NULL, "Description must not be NULL.\n");
+        ASSERT(state != NULL, "State must not be NULL.\n");
+        ASSERT(desc->stage.type == ORenderer::SHADER_COMPUTE, "Using a non-compute shader inside a compute pipeline.\n");
 
         VkPipelineShaderStageCreateInfo stage = { };
         stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         stage.pNext = NULL;
-        if (desc->stage.type != ORenderer::SHADER_COMPUTE) {
-            return ORenderer::RESULT_INVALIDARG;
-        }
 
         if (state->handle == RENDERER_INVALIDHANDLE) {
             this->resourcemutex.lock();
@@ -911,56 +903,39 @@ namespace OVulkan {
         stage.module = this->createshadermodule(desc->stage);
         stage.pName = "main";
 
-        VkDescriptorSetLayoutBinding *layoutbindings = (VkDescriptorSetLayoutBinding *)malloc(sizeof(VkDescriptorSetLayoutBinding) * desc->resourcecount);
-        ASSERT(layoutbindings != NULL, "Failed to allocate memory for Vulkan descriptor set layout binding.\n");
-        for (size_t i = 0; i < desc->resourcecount; i++) {
-            struct ORenderer::pipelinestateresourcedesc *resource = &desc->resources[i];
-            layoutbindings[i].binding = resource->binding;
-            layoutbindings[i].descriptorCount = 1;
-            layoutbindings[i].stageFlags =
-                (resource->stages & ORenderer::STAGE_VERTEX ? VK_SHADER_STAGE_VERTEX_BIT : 0) |
-                (resource->stages & ORenderer::STAGE_TESSCONTROL ? VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT : 0) |
-                (resource->stages & ORenderer::STAGE_TESSEVALUATION ? VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT : 0) |
-                (resource->stages & ORenderer::STAGE_GEOMETRY ? VK_SHADER_STAGE_GEOMETRY_BIT : 0) |
-                (resource->stages & ORenderer::STAGE_FRAGMENT ? VK_SHADER_STAGE_FRAGMENT_BIT : 0);
-            layoutbindings[i].pImmutableSamplers = NULL;
-            layoutbindings[i].descriptorType = descriptortypetable[resource->type];
-        }
-
-        struct pipelinestate *vkstate = &this->pipelinestates[state->handle].vkresource;
 
         this->resourcemutex.lock();
-        VkDescriptorSetLayoutCreateInfo layoutcreate = { };
-        layoutcreate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutcreate.pNext = NULL;
-        layoutcreate.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-        layoutcreate.bindingCount = desc->resourcecount;
-        layoutcreate.pBindings = layoutbindings;
-        VkResult res = vkCreateDescriptorSetLayout(this->dev, &layoutcreate, NULL, &vkstate->descsetlayout);
-        ASSERT(res == VK_SUCCESS, "Failed to create Vulkan descriptor set layout %d.\n", res);
-        free(layoutbindings);
 
-        VkDescriptorSetAllocateInfo allocinfo = { };
-        allocinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocinfo.pNext = NULL;
-        allocinfo.descriptorPool = this->descpool;
-        allocinfo.descriptorSetCount = RENDERER_MAXLATENCY;
-        VkDescriptorSetLayout alloclayouts[RENDERER_MAXLATENCY] = { };
-        for (size_t i = 0; i < RENDERER_MAXLATENCY; i++) {
-            alloclayouts[i] = vkstate->descsetlayout;
+        VkResult res;
+        struct pipelinestate *vkstate = &this->pipelinestates[state->handle].vkresource;
+
+        if (desc->reslayout != NULL) {
+            vkstate->descsetlayout = this->layouts[desc->reslayout->handle].vkresource.layout;
         }
-        allocinfo.pSetLayouts = alloclayouts;
-        res = vkAllocateDescriptorSets(this->dev, &allocinfo, vkstate->descsets);
-        ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan descriptor sets %d.\n", res);
 
 
         VkPipelineLayoutCreateInfo pipelayoutcreate = { };
         pipelayoutcreate.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelayoutcreate.pNext = NULL;
-        pipelayoutcreate.setLayoutCount = 1;
-        pipelayoutcreate.pSetLayouts = &vkstate->descsetlayout;
-        pipelayoutcreate.pushConstantRangeCount = 0;
-        pipelayoutcreate.pPushConstantRanges = NULL;
+        if (desc->reslayout != NULL) {
+            pipelayoutcreate.setLayoutCount = 1;
+            pipelayoutcreate.pSetLayouts = &vkstate->descsetlayout;
+        } else {
+            pipelayoutcreate.setLayoutCount = 0;
+            pipelayoutcreate.pSetLayouts = NULL;
+        }
+
+        if (desc->constantssize > 0) {
+            pipelayoutcreate.pushConstantRangeCount = 1;
+
+            VkPushConstantRange range = { };
+            range.offset = 0;
+            range.size = desc->constantssize;
+            range.stageFlags = VK_SHADER_STAGE_ALL;
+            pipelayoutcreate.pPushConstantRanges = &range;
+        } else {
+            pipelayoutcreate.pPushConstantRanges = 0;
+        }
         res = vkCreatePipelineLayout(this->dev, &pipelayoutcreate, NULL, &vkstate->pipelinelayout);
         ASSERT(res == VK_SUCCESS, "Failed to create Vulkan pipeline layout %d.\n", res);
 
@@ -983,9 +958,9 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::createpipelinestate(struct ORenderer::pipelinestatedesc *desc, struct ORenderer::pipelinestate *state) {
-        if (desc->stagecount <= 0) {
-            return ORenderer::RESULT_INVALIDARG;
-        }
+        ASSERT(desc != NULL, "Description must not be NULL.\n");
+        ASSERT(state != NULL, "State must not be NULL.\n");
+        ASSERT(desc->stagecount > 0, "Need at least one stage in a pipeline.\n");
 
         VkPipelineTessellationStateCreateInfo tesscreate = { };
         tesscreate.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
@@ -1000,7 +975,7 @@ namespace OVulkan {
             stages[i].pNext = NULL;
             if (desc->stages[i].type == ORenderer::STAGE_COMPUTE) {
                 free(stages);
-                return ORenderer::RESULT_INVALIDARG;
+                ASSERT(false, "Using a compute shader inside a normal pipeline.\n");
             }
             stages[i].stage = shaderstagetable[desc->stages[i].type];
             stages[i].module = this->createshadermodule(desc->stages[i]);
@@ -1148,57 +1123,37 @@ namespace OVulkan {
             };
         }
 
-        VkDescriptorSetLayoutBinding *layoutbindings = (VkDescriptorSetLayoutBinding *)malloc(sizeof(VkDescriptorSetLayoutBinding) * desc->resourcecount);
-        ASSERT(layoutbindings != NULL, "Failed to allocate memory for Vulkan descriptor set layout bindings.\n");
-        for (size_t i = 0; i < desc->resourcecount; i++) {
-            struct ORenderer::pipelinestateresourcedesc *resource = &desc->resources[i];
-            layoutbindings[i].binding = resource->binding;
-            layoutbindings[i].descriptorCount = 1;
-            layoutbindings[i].stageFlags =
-                (resource->stages & ORenderer::STAGE_VERTEX ? VK_SHADER_STAGE_VERTEX_BIT : 0) |
-                (resource->stages & ORenderer::STAGE_TESSCONTROL ? VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT : 0) |
-                (resource->stages & ORenderer::STAGE_TESSEVALUATION ? VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT : 0) |
-                (resource->stages & ORenderer::STAGE_GEOMETRY ? VK_SHADER_STAGE_GEOMETRY_BIT : 0) |
-                (resource->stages & ORenderer::STAGE_FRAGMENT ? VK_SHADER_STAGE_FRAGMENT_BIT : 0);
-            layoutbindings[i].pImmutableSamplers = NULL;
-            layoutbindings[i].descriptorType = descriptortypetable[resource->type];
-        }
-
         this->resourcemutex.lock();
 
+        VkResult res;
         struct pipelinestate *vkstate = &this->pipelinestates[state->handle].vkresource;
-
-        VkDescriptorSetLayoutCreateInfo layoutcreate = { };
-        layoutcreate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutcreate.pNext = NULL;
-        layoutcreate.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-        layoutcreate.bindingCount = desc->resourcecount;
-        layoutcreate.pBindings = layoutbindings;
-        VkResult res = vkCreateDescriptorSetLayout(this->dev, &layoutcreate, NULL, &vkstate->descsetlayout);
-        ASSERT(res == VK_SUCCESS, "Failed to create Vulkan descriptor set layout %d.\n", res);
-        free(layoutbindings);
-
-        // VkDescriptorSetAllocateInfo allocinfo = { };
-        // allocinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        // allocinfo.pNext = NULL;
-        // allocinfo.descriptorPool = this->descpool;
-        // allocinfo.descriptorSetCount = RENDERER_MAXLATENCY;
-        // VkDescriptorSetLayout alloclayouts[RENDERER_MAXLATENCY] = { };
-        // for (size_t i = 0; i < RENDERER_MAXLATENCY; i++) {
-        //     alloclayouts[i] = vkstate->descsetlayout;
-        // }
-        // allocinfo.pSetLayouts = alloclayouts;
-        // res = vkAllocateDescriptorSets(this->dev, &allocinfo, vkstate->descsets);
-        // ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan descriptor sets %d.\n", res);
-
+        if (desc->reslayout != NULL) {
+            vkstate->descsetlayout = this->layouts[desc->reslayout->handle].vkresource.layout;
+        }
 
         VkPipelineLayoutCreateInfo pipelayoutcreate = { };
         pipelayoutcreate.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelayoutcreate.pNext = NULL;
-        pipelayoutcreate.setLayoutCount = 1;
-        pipelayoutcreate.pSetLayouts = &vkstate->descsetlayout;
-        pipelayoutcreate.pushConstantRangeCount = 0;
-        pipelayoutcreate.pPushConstantRanges = NULL;
+        if (desc->reslayout != NULL) {
+            pipelayoutcreate.setLayoutCount = 1;
+            pipelayoutcreate.pSetLayouts = &vkstate->descsetlayout;
+        } else {
+            pipelayoutcreate.setLayoutCount = 0;
+            pipelayoutcreate.pSetLayouts = NULL;
+        }
+
+        if (desc->constantssize > 0) {
+            pipelayoutcreate.pushConstantRangeCount = 1;
+
+            VkPushConstantRange range = { };
+            range.offset = 0;
+            range.size = desc->constantssize;
+            range.stageFlags = VK_SHADER_STAGE_ALL;
+            pipelayoutcreate.pPushConstantRanges = &range;
+        } else {
+            pipelayoutcreate.pPushConstantRanges = 0;
+        }
+
         res = vkCreatePipelineLayout(this->dev, &pipelayoutcreate, NULL, &vkstate->pipelinelayout);
         ASSERT(res == VK_SUCCESS, "Failed to create Vulkan pipeline layout %d.\n", res);
 
@@ -1241,15 +1196,11 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::createtextureview(struct ORenderer::textureviewdesc *desc, struct ORenderer::textureview *view) {
-        if (desc->layercount <= 0) {
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->mipcount <= 0) {
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->basemiplevel > desc->mipcount) {
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->texture.handle == RENDERER_INVALIDHANDLE) {
-            return ORenderer::RESULT_INVALIDARG;
-        }
+        ASSERT(desc != NULL, "Description must not be NULL.\n");
+        ASSERT(view != NULL, "View must not be NULL.\n");
+        ASSERT(desc->layercount > 0, "Invalid layer count.\n");
+        ASSERT(desc->mipcount > 0, "Invalid mip level count.\n");
+        ASSERT(desc->texture.handle != RENDERER_INVALIDHANDLE, "Invalid source texture.\n");
 
         if (view->handle == RENDERER_INVALIDHANDLE) {
             this->resourcemutex.lock();
@@ -1287,7 +1238,93 @@ namespace OVulkan {
         return ORenderer::RESULT_SUCCESS;
     }
 
+    uint8_t VulkanContext::createresourcesetlayout(struct ORenderer::resourcesetdesc *desc, struct ORenderer::resourcesetlayout *layout) {
+        ASSERT(desc != NULL, "Description must not be NULL.\n");
+        ASSERT(layout != NULL, "Layout must not be NULL.\n");
+        ASSERT(desc->resources != NULL, "Invalid resources for resource set layout.\n");
+        ASSERT(desc->resourcecount > 0, "No resources for resource set layout.\n");
+
+        if (layout->handle == RENDERER_INVALIDHANDLE) {
+            this->resourcemutex.lock();
+            layout->handle = this->resourcehandle++;
+            this->layouts[layout->handle].vkresource = (struct resourcesetlayout) { };
+            this->resourcemutex.unlock();
+        }
+        VkDescriptorSetLayoutBinding *layoutbindings = (VkDescriptorSetLayoutBinding *)malloc(sizeof(VkDescriptorSetLayoutBinding) * desc->resourcecount);
+        VkDescriptorBindingFlags *flagbindings = (VkDescriptorBindingFlags *)malloc(sizeof(VkDescriptorBindingFlags) * desc->resourcecount);
+        ASSERT(layoutbindings != NULL, "Failed to allocate memory for Vulkan descriptor set layout bindings.\n");
+        for (size_t i = 0; i < desc->resourcecount; i++) {
+            struct ORenderer::resourcedesc *resource = &desc->resources[i];
+            layoutbindings[i].binding = resource->binding;
+            layoutbindings[i].descriptorCount = resource->count;
+            layoutbindings[i].stageFlags =
+                (resource->stages & ORenderer::STAGE_VERTEX ? VK_SHADER_STAGE_VERTEX_BIT : 0) |
+                (resource->stages & ORenderer::STAGE_TESSCONTROL ? VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT : 0) |
+                (resource->stages & ORenderer::STAGE_TESSEVALUATION ? VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT : 0) |
+                (resource->stages & ORenderer::STAGE_GEOMETRY ? VK_SHADER_STAGE_GEOMETRY_BIT : 0) |
+                (resource->stages & ORenderer::STAGE_FRAGMENT ? VK_SHADER_STAGE_FRAGMENT_BIT : 0);
+            layoutbindings[i].pImmutableSamplers = NULL;
+            layoutbindings[i].descriptorType = descriptortypetable[resource->type];
+
+            flagbindings[i] = (resource->flag & ORenderer::RESOURCEFLAG_BINDLESS ? VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT : 0);
+        }
+
+        this->resourcemutex.lock();
+
+        struct resourcesetlayout *vkstate = &this->layouts[layout->handle].vkresource;
+
+        VkDescriptorSetLayoutBindingFlagsCreateInfo flags = { };
+        flags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+        flags.pNext = NULL;
+        flags.bindingCount = desc->resourcecount;
+        flags.pBindingFlags = flagbindings;
+
+        VkDescriptorSetLayoutCreateInfo layoutcreate = { };
+        layoutcreate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutcreate.pNext = &flags;
+        layoutcreate.flags = (desc->flag & ORenderer::RESOURCEFLAG_BINDLESS ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT : 0);
+        layoutcreate.bindingCount = desc->resourcecount;
+        layoutcreate.pBindings = layoutbindings;
+        VkResult res = vkCreateDescriptorSetLayout(this->dev, &layoutcreate, NULL, &vkstate->layout);
+        ASSERT(res == VK_SUCCESS, "Failed to create Vulkan descriptor set layout %d.\n", res);
+        free(layoutbindings);
+        free(flagbindings);
+        this->resourcemutex.unlock();
+
+        return ORenderer::RESULT_SUCCESS;
+    }
+
+    uint8_t VulkanContext::createresourceset(struct ORenderer::resourcesetlayout *layout, struct ORenderer::resourceset *set) {
+        ASSERT(layout != NULL, "Layout must not be NULL.\n");
+        ASSERT(set != NULL, "Set must not be NULL.\n");
+        ASSERT(layout->handle != RENDERER_INVALIDHANDLE, "Invalid layout.\n");
+
+        if (set->handle == RENDERER_INVALIDHANDLE) {
+            this->resourcemutex.lock();
+            set->handle = this->resourcehandle++;
+            this->sets[set->handle].vkresource = (struct resourceset) { };
+            this->resourcemutex.unlock();
+        }
+
+
+        this->resourcemutex.lock();
+        VkDescriptorSetAllocateInfo info = { };
+        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        info.pNext = NULL;
+        info.descriptorSetCount = 1;
+        info.descriptorPool = this->descpool;
+        info.pSetLayouts = &this->layouts[layout->handle].vkresource.layout;
+
+        VkResult res = vkAllocateDescriptorSets(this->dev, &info, &this->sets[set->handle].vkresource.set);
+        ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan descriptor set %d.\n", res);
+
+        this->resourcemutex.unlock();
+        return ORenderer::RESULT_SUCCESS;
+    }
+
     uint8_t VulkanContext::createsampler(struct ORenderer::samplerdesc *desc, struct ORenderer::sampler *sampler) {
+        ASSERT(desc != NULL, "Description must not be NULL.\n");
+        ASSERT(sampler != NULL, "Sampler must not be NULL.\n");
         if (sampler->handle == RENDERER_INVALIDHANDLE) {
             this->resourcemutex.lock();
             sampler->handle = this->resourcehandle++;
@@ -1325,13 +1362,10 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::mapbuffer(struct ORenderer::buffermapdesc *desc, struct ORenderer::buffermap *map) {
-        if (desc == NULL) {
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (map == NULL) {
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->buffer.handle == RENDERER_INVALIDHANDLE) {
-            return ORenderer::RESULT_INVALIDARG;
-        }
+        ASSERT(desc != NULL, "Description must not be NULL.\n");
+        ASSERT(map != NULL, "Map must not be NULL.\n");
+        ASSERT(desc->buffer.handle != RENDERER_INVALIDHANDLE, "Invalid buffer.\n");
+        ASSERT(desc->size > 0, "Invalid mapping size.\n");
 
         this->resourcemutex.lock();
         struct buffer *buffer = &this->buffers[desc->buffer.handle].vkresource;
@@ -1341,7 +1375,7 @@ namespace OVulkan {
                 VkResult res = vmaMapMemory(allocator, buffer->allocation[i], &map->mapped[i]);
                 if (res != VK_SUCCESS) {
                     resourcemutex.unlock();
-                    return ORenderer::RESULT_FAILED;
+                    ASSERT(false, "Failed to map memory.\n");
                 }
             }
             resourcemutex.unlock();
@@ -1349,18 +1383,14 @@ namespace OVulkan {
         } else {
             VkResult res = vmaMapMemory(allocator, buffer->allocation[0], &map->mapped[0]);
             resourcemutex.unlock();
-            if (res != VK_SUCCESS) {
-                return ORenderer::RESULT_FAILED;
-            }
+            ASSERT(res == VK_SUCCESS, "Failed to map memory.\n");
             buffer->mapped = true;
         }
         return ORenderer::RESULT_SUCCESS;
     }
 
     uint8_t VulkanContext::unmapbuffer(struct ORenderer::buffermap map) {
-        if (map.buffer.handle == RENDERER_INVALIDHANDLE) {
-            return ORenderer::RESULT_INVALIDARG;
-        }
+        ASSERT(map.buffer.handle != RENDERER_INVALIDHANDLE, "Invalid buffer.\n");
         this->resourcemutex.lock();
         struct buffer *buffer = &this->buffers[map.buffer.handle].vkresource;
         if (buffer->flags & ORenderer::BUFFERFLAG_PERFRAME) {
@@ -1380,13 +1410,9 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::copybuffer(struct ORenderer::buffercopydesc *desc) {
-        if (desc == NULL) {
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->src.handle == RENDERER_INVALIDHANDLE) {
-            return ORenderer::RESULT_INVALIDARG;
-        } else if (desc->dst.handle == RENDERER_INVALIDHANDLE) {
-            return ORenderer::RESULT_INVALIDARG;
-        }
+        ASSERT(desc != NULL, "Description must not be NULL.\n");
+        ASSERT(desc->src.handle != RENDERER_INVALIDHANDLE, "Invalid source buffer.\n");
+        ASSERT(desc->dst.handle != RENDERER_INVALIDHANDLE, "Invalid destination buffer.\n");
 
         VkCommandBuffer cmd = this->beginimmediate();
 
@@ -1408,9 +1434,8 @@ namespace OVulkan {
     }
 
     void VulkanContext::destroytexture(struct ORenderer::texture *texture) {
-        if (texture->handle == RENDERER_INVALIDHANDLE) {
-            return;
-        }
+        ASSERT(texture != NULL, "Texture must not be NULL.\n");
+        ASSERT(texture->handle != RENDERER_INVALIDHANDLE, "Invalid texture.\n");
 
         this->resourcemutex.lock();
         struct texture *vktexture = &this->textures[texture->handle].vkresource;
@@ -1427,9 +1452,8 @@ namespace OVulkan {
     }
 
     void VulkanContext::destroytextureview(struct ORenderer::textureview *textureview) {
-        if (textureview->handle == RENDERER_INVALIDHANDLE) {
-            return;
-        }
+        ASSERT(textureview != NULL, "View must not be NULL.\n");
+        ASSERT(textureview->handle != RENDERER_INVALIDHANDLE, "Invalid texture view.\n");
         this->resourcemutex.lock();
         struct textureview *vktextureview = &this->textureviews[textureview->handle].vkresource;
         vkDestroyImageView(this->dev, vktextureview->imageview, NULL);
@@ -1439,9 +1463,8 @@ namespace OVulkan {
     }
 
     void VulkanContext::destroybuffer(struct ORenderer::buffer *buffer) {
-        if (buffer->handle == RENDERER_INVALIDHANDLE) {
-            return;
-        }
+        ASSERT(buffer != NULL, "Buffer must not be NULL.\n");
+        ASSERT(buffer->handle != RENDERER_INVALIDHANDLE, "Invalid buffer.\n");
 
         this->resourcemutex.lock();
         struct buffer *vkbuffer = &this->buffers[buffer->handle].vkresource;
@@ -1466,9 +1489,8 @@ namespace OVulkan {
     }
 
     void VulkanContext::destroyframebuffer(struct ORenderer::framebuffer *framebuffer) {
-        if (framebuffer->handle == RENDERER_INVALIDHANDLE) {
-            return;
-        }
+        ASSERT(framebuffer != NULL, "Framebuffer must not be NULL.\n");
+        ASSERT(framebuffer->handle != RENDERER_INVALIDHANDLE, "Invalid framebuffer.\n");
 
         this->resourcemutex.lock();
         struct framebuffer *vkframebuffer = &this->framebuffers[framebuffer->handle].vkresource;
@@ -1479,9 +1501,8 @@ namespace OVulkan {
     }
 
     void VulkanContext::destroyrenderpass(struct ORenderer::renderpass *pass) {
-        if (pass->handle == RENDERER_INVALIDHANDLE) {
-            return;
-        }
+        ASSERT(pass != NULL, "Pass must not be NULL.\n");
+        ASSERT(pass->handle != RENDERER_INVALIDHANDLE, "Invalid renderpass.\n");
 
         this->resourcemutex.lock();
         struct renderpass *vkrenderpass = &this->renderpasses[pass->handle].vkresource;
@@ -1492,9 +1513,8 @@ namespace OVulkan {
     }
 
     void VulkanContext::destroypipelinestate(struct ORenderer::pipelinestate *state) {
-        if (state->handle == RENDERER_INVALIDHANDLE) {
-            return;
-        }
+        ASSERT(state != NULL, "State must not be NULL.\n");
+        ASSERT(state->handle != RENDERER_INVALIDHANDLE, "Invalid pipelinestate.\n");
 
         this->resourcemutex.lock();
         struct pipelinestate *vkpipelinestate = &this->pipelinestates[state->handle].vkresource;
@@ -1504,7 +1524,7 @@ namespace OVulkan {
         }
         vkDestroyPipelineLayout(this->dev, vkpipelinestate->pipelinelayout, NULL);
         vkFreeDescriptorSets(this->dev, this->descpool, RENDERER_MAXLATENCY, vkpipelinestate->descsets);
-        vkDestroyDescriptorSetLayout(this->dev, vkpipelinestate->descsetlayout, NULL);
+        // vkDestroyDescriptorSetLayout(this->dev, vkpipelinestate->descsetlayout, NULL);
         vkDestroyPipeline(this->dev, vkpipelinestate->pipeline, NULL);
         this->pipelinestates.erase(state->handle);
         state->handle = RENDERER_INVALIDHANDLE;
@@ -1512,6 +1532,7 @@ namespace OVulkan {
     }
 
     void VulkanContext::setdebugname(struct ORenderer::texture texture, const char *name) {
+        ASSERT(texture.handle != RENDERER_INVALIDHANDLE, "Invalid texture.\n");
 #ifdef OMICRON_DEBUG
         VkDebugUtilsObjectNameInfoEXT nameinfo = { };
         nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
@@ -1525,6 +1546,7 @@ namespace OVulkan {
     }
 
     void VulkanContext::setdebugname(struct ORenderer::textureview view, const char *name) {
+        ASSERT(view.handle != RENDERER_INVALIDHANDLE, "Invalid texture view.\n");
 #ifdef OMICRON_DEBUG
         VkDebugUtilsObjectNameInfoEXT nameinfo = { };
         nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
@@ -1538,6 +1560,7 @@ namespace OVulkan {
     }
 
     void VulkanContext::setdebugname(struct ORenderer::buffer buffer, const char *name) {
+        ASSERT(buffer.handle != RENDERER_INVALIDHANDLE, "Invalid buffer.\n");
 #ifdef OMICRON_DEBUG
         if (!(this->buffers[buffer.handle].vkresource.flags & ORenderer::BUFFERFLAG_PERFRAME)) {
             VkDebugUtilsObjectNameInfoEXT nameinfo = { };
@@ -1565,6 +1588,7 @@ namespace OVulkan {
     }
 
     void VulkanContext::setdebugname(struct ORenderer::framebuffer framebuffer, const char *name) {
+        ASSERT(framebuffer.handle != RENDERER_INVALIDHANDLE, "Invalid framebuffer.\n");
 #ifdef OMICRON_DEBUG
         VkDebugUtilsObjectNameInfoEXT nameinfo = { };
         nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
@@ -1578,6 +1602,7 @@ namespace OVulkan {
     }
 
     void VulkanContext::setdebugname(struct ORenderer::renderpass renderpass, const char *name) {
+        ASSERT(renderpass.handle != RENDERER_INVALIDHANDLE, "Invalid renderpass.\n");
 #ifdef OMICRON_DEBUG
         VkDebugUtilsObjectNameInfoEXT nameinfo = { };
         nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
@@ -1590,6 +1615,7 @@ namespace OVulkan {
 #endif
     }
     void VulkanContext::setdebugname(struct ORenderer::pipelinestate state, const char *name) {
+        ASSERT(state.handle != RENDERER_INVALIDHANDLE, "Invalid state.\n");
 #ifdef OMICRON_DEBUG
         VkDebugUtilsObjectNameInfoEXT nameinfo = { };
         nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
@@ -1603,6 +1629,7 @@ namespace OVulkan {
     }
 
     void VulkanContext::flushrange(struct ORenderer::buffer buffer, size_t size) {
+        ASSERT(buffer.handle != RENDERER_INVALIDHANDLE, "Invalid buffer.\n");
         this->resourcemutex.lock();
         VkMappedMemoryRange range = { };
         range.size = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
@@ -1616,17 +1643,13 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::requestbackbuffer(struct ORenderer::framebuffer *framebuffer) {
-        if (framebuffer == NULL) {
-            return ORenderer::RESULT_INVALIDARG;
-        }
+        ASSERT(framebuffer != NULL, "Framebuffer must not be NULL.\n");
         *framebuffer = this->swapfbs[this->swapimage];
         return ORenderer::RESULT_SUCCESS;
     }
 
     uint8_t VulkanContext::requestbackbufferinfo(struct ORenderer::backbufferinfo *info) {
-        if (info == NULL) {
-            return ORenderer::RESULT_INVALIDARG;
-        }
+        ASSERT(info != NULL, "Info must not be NULL.\n");
 
         info->format = ORenderer::FORMAT_BGRA8SRGB; // XXX: Return selected swapchain format (based on support)
         info->width = this->surfacecaps.currentExtent.width;
@@ -1646,6 +1669,7 @@ namespace OVulkan {
                     // printf("OP_DEBUGZONEBEGIN\n");
 #ifdef OMICRON_DEBUG
                     void *mem = stream->tempmem.alloc(sizeof(tracy::VkCtxScope));
+                    // Initialise but using our preallocated memory for speed.
                     it->zonebegin.zone = new (mem) tracy::VkCtxScope(this->tracyctx, TracyLine, TracyFile, strlen(TracyFile), TracyFunction, strlen(TracyFunction), it->zonebegin.name, strlen(it->zonebegin.name), cmd, true);
 #endif
                     break;
@@ -1775,7 +1799,7 @@ namespace OVulkan {
                         case ORenderer::RESOURCE_STORAGE:
                             stream->mappings.push_back((struct ORenderer::pipelinestateresourcemap) { .binding = it->resource.binding, .type = it->resource.type, .bufferbind = it->resource.bufferbind });
                         case ORenderer::RESOURCE_SAMPLER:
-                        case ORenderer::RESOURCE_STORAGEIMAGE:
+                        case ORenderer::RESOURCE_STORAGETEXTURE:
                             stream->mappings.push_back((struct ORenderer::pipelinestateresourcemap) { .binding = it->resource.binding, .type = it->resource.type, .sampledbind = it->resource.sampledbind });
                             break;
                     }
@@ -1813,7 +1837,7 @@ namespace OVulkan {
                             buffinfos[i].offset = bind.offset;
                             buffinfos[i].range = bind.range == SIZE_MAX ? VK_WHOLE_SIZE : bind.range;
                             wds[i].pBufferInfo = &buffinfos[i];
-                        } else if (stream->mappings[i].type == ORenderer::RESOURCE_SAMPLER || stream->mappings[i].type == ORenderer::RESOURCE_STORAGEIMAGE) {
+                        } else if (stream->mappings[i].type == ORenderer::RESOURCE_SAMPLER || stream->mappings[i].type == ORenderer::RESOURCE_STORAGETEXTURE) {
                             struct ORenderer::sampledbind bind = stream->mappings[i].sampledbind;
                             struct sampler *sampler = &this->samplers[bind.sampler.handle].vkresource;
                             struct textureview *view = &this->textureviews[bind.view.handle].vkresource;
@@ -1875,9 +1899,7 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::submitstream(ORenderer::Stream *stream) {
-        if (stream == NULL) {
-            return ORenderer::RESULT_INVALIDARG;
-        }
+        ASSERT(stream != NULL, "Stream must not be NULL.\n");
         VkCommandBuffer cmd = this->beginimmediate();
 
         // this->interpretstream(cmd, stream);
@@ -1890,7 +1912,7 @@ namespace OVulkan {
     }
 
     void VulkanStream::begin(void) {
-        if (primary != 2) {
+        if (primary == 1) { // Primary
             VkCommandBufferBeginInfo info = { };
             info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             info.pNext = NULL;
@@ -1898,9 +1920,36 @@ namespace OVulkan {
             info.pInheritanceInfo = NULL;
             VkResult res = vkBeginCommandBuffer(this->cmd, &info);
             ASSERT(res == VK_SUCCESS, "Failed to begin Vulkan command buffer %d.\n", res);
-        } else {
+        } else if (primary == 0) { // Sescondary
+            VkCommandBufferBeginInfo info = { };
+            info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            info.pNext = NULL;
+            info.pInheritanceInfo = NULL;
+            info.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+            VkResult res = vkBeginCommandBuffer(this->cmd, &info);
+            ASSERT(res == VK_SUCCESS, "Failed to begin Vulkan command buffer %d.\n", res);
+        } else { // Immediate
             this->context->beginimmediate();
         }
+    }
+
+    uint64_t VulkanStream::zonebegin(const char *name) {
+        ASSERT(name != NULL, "Invalid zone name.\n");
+        void *mem = this->tempmem.alloc(sizeof(tracy::VkCtxScope)); // allocate
+
+#ifdef OMICRON_DEBUG
+        tracy::VkCtxScope *ctx = new (mem) tracy::VkCtxScope(this->context->tracyctx, TracyLine, TracyFile, strlen(TracyFile), TracyFunction, strlen(TracyFunction), name, strlen(name), this->cmd, true);
+#else
+        return 0;
+#endif
+        return (uint64_t)ctx;
+    }
+
+    void VulkanStream::zoneend(uint64_t zone) {
+#ifdef OMICRON_DEBUG
+        tracy::VkCtxScope *ctx = (tracy::VkCtxScope *)zone;
+        ctx->~VkCtxScope();
+#endif
     }
 
     void VulkanStream::flushcmd(void) {
@@ -1982,6 +2031,7 @@ namespace OVulkan {
             vkbuffers[i] = buffer->buffer[buffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? this->context->frame : 0];
         }
         vkCmdBindVertexBuffers(this->cmd, 0, bindcount, vkbuffers, offsets);
+        this->tempmem.freeto(marker);
     }
 
     void VulkanStream::setvtxbuffer(struct ORenderer::buffer buffer, size_t offset) {
@@ -2025,14 +2075,14 @@ namespace OVulkan {
                 buffinfos[i].offset = bind.offset;
                 buffinfos[i].range = bind.range == SIZE_MAX ? VK_WHOLE_SIZE : bind.range;
                 wds[i].pBufferInfo = &buffinfos[i];
-            } else if (this->mappings[i].type == ORenderer::RESOURCE_SAMPLER || this->mappings[i].type == ORenderer::RESOURCE_STORAGEIMAGE) {
+            } else if (this->mappings[i].type == ORenderer::RESOURCE_SAMPLER || this->mappings[i].type == ORenderer::RESOURCE_STORAGETEXTURE || this->mappings[i].type == ORenderer::RESOURCE_TEXTURE) {
                 struct ORenderer::sampledbind bind = this->mappings[i].sampledbind;
                 struct sampler *sampler = &this->context->samplers[bind.sampler.handle].vkresource;
                 struct textureview *view = &this->context->textureviews[bind.view.handle].vkresource;
                 wds[i].descriptorType = descriptortypetable[this->mappings[i].type];
-                imginfos[i].sampler = sampler->sampler;
-                imginfos[i].imageView = view->imageview;
-                imginfos[i].imageLayout = layouttable[bind.layout];
+                imginfos[i].sampler = this->mappings[i].type == ORenderer::RESOURCE_SAMPLER ? sampler->sampler : VK_NULL_HANDLE;
+                imginfos[i].imageView = this->mappings[i].type != ORenderer::RESOURCE_SAMPLER ? view->imageview : VK_NULL_HANDLE;
+                imginfos[i].imageLayout = this->mappings[i].type != ORenderer::RESOURCE_SAMPLER ? layouttable[bind.layout] : VK_IMAGE_LAYOUT_UNDEFINED;
                 wds[i].pImageInfo = &imginfos[i];
             }
         }
@@ -2040,6 +2090,7 @@ namespace OVulkan {
         struct pipelinestate *pipelinestate = &this->context->pipelinestates[this->pipelinestate.handle].vkresource;
         {
             ZoneScopedN("push descriptor\n");
+            // Incredibly expensive.
             vkCmdPushDescriptorSetKHR(cmd, pipelinestate->type == ORenderer::GRAPHICSPIPELINE ? VK_PIPELINE_BIND_POINT_GRAPHICS : VK_PIPELINE_BIND_POINT_COMPUTE, pipelinestate->pipelinelayout, 0, this->mappings.size(), wds);
         }
 
@@ -2085,8 +2136,66 @@ namespace OVulkan {
         vkCmdCopyBufferToImage(cmd, vkbuffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? vkbuffer->buffer[this->context->frame] : vkbuffer->buffer[0], vktexture->image, layouttable[vktexture->state], 1, &vkregion);
     }
 
-    void VulkanStream::submitstream(ORenderer::Stream *stream) {
+    void VulkanStream::pushconstants(struct ORenderer::pipelinestate state, void *data, size_t size) {
+        this->context->resourcemutex.lock();
+        struct pipelinestate *vkstate = &this->context->pipelinestates[state.handle].vkresource;
+        vkCmdPushConstants(this->cmd, vkstate->pipelinelayout, VK_SHADER_STAGE_ALL, 0, size, data);
+        this->context->resourcemutex.unlock();
+    }
 
+    void VulkanContext::updateset(struct ORenderer::resourceset set, struct ORenderer::samplerbind *bind) {
+        VkDescriptorImageInfo info = { };
+        struct sampler *sampler = &this->samplers[bind->sampler.handle].vkresource;
+        struct resourceset *vkset = &this->sets[set.handle].vkresource;
+
+        info.sampler = sampler->sampler;
+        info.imageLayout = layouttable[bind->layout];
+
+        VkWriteDescriptorSet wset = { };
+        wset.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        wset.pNext = NULL;
+        wset.dstSet = vkset->set;
+        wset.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+        wset.descriptorCount = 1;
+        wset.dstBinding = 0; // XXX: SAMPLER BINDING
+        wset.pImageInfo = &info;
+        wset.dstArrayElement = bind->id;
+        vkUpdateDescriptorSets(this->dev, 1, &wset, 0, NULL);
+    }
+
+    void VulkanContext::updateset(struct ORenderer::resourceset set, struct ORenderer::texturebind *bind) {
+        VkDescriptorImageInfo info = { };
+        struct textureview *view = &this->textureviews[bind->view.handle].vkresource;
+        struct resourceset *vkset = &this->sets[set.handle].vkresource;
+
+        info.imageView = view->imageview;
+        info.imageLayout = layouttable[bind->layout];
+
+        VkWriteDescriptorSet wset = { };
+        wset.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        wset.pNext = NULL;
+        wset.dstSet = vkset->set;
+        wset.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        wset.descriptorCount = 1;
+        wset.dstBinding = 1; // XXX: TEXTURE BINDING
+        wset.pImageInfo = &info;
+        wset.dstArrayElement = bind->id;
+        vkUpdateDescriptorSets(this->dev, 1, &wset, 0, NULL);
+    }
+
+    void VulkanStream::bindset(struct ORenderer::resourceset set) {
+        this->context->resourcemutex.lock();
+        struct resourceset *vkset = &this->context->sets[set.handle].vkresource;
+        struct pipelinestate *state = &this->context->pipelinestates[this->pipelinestate.handle].vkresource;
+        vkCmdBindDescriptorSets(this->cmd, state->type == ORenderer::COMPUTEPIPELINE ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS, state->pipelinelayout, 0, 1, &vkset->set, 0, NULL);
+        this->context->resourcemutex.unlock();
+    }
+
+    void VulkanStream::submitstream(ORenderer::Stream *stream) {
+        stream->claim();
+        // vkCmdExecuteCommands(this->cmd, 1, &((VulkanStream *)stream)->cmd);
+        this->context->streampool.free((VulkanStream *)stream);
+        stream->release();
     }
 
     void VulkanStream::endrenderpass(void) {
@@ -2097,6 +2206,7 @@ namespace OVulkan {
     void VulkanStream::end(void) {
 
         if (this->primary != 2) {
+            TracyVkCollect(this->context->tracyctx, cmd);
             VkResult res = vkEndCommandBuffer(this->cmd);
             ASSERT(res == VK_SUCCESS, "Failed to end Vulkan command buffer %d.\n", res);
         } else {
@@ -2232,9 +2342,8 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::createbackbuffer(struct ORenderer::renderpass pass, struct ORenderer::textureview *depth) {
-        if (pass.handle == RENDERER_INVALIDHANDLE) {
-            return ORenderer::RESULT_INVALIDARG;
-        }
+        ASSERT(pass.handle != RENDERER_INVALIDHANDLE, "Invalid renderpass.\n");
+        ASSERT(depth == NULL || depth->handle != RENDERER_INVALIDHANDLE, "Invalid depth texture view.\n");
 
         this->swapfbpass = pass;
 
@@ -2245,7 +2354,11 @@ namespace OVulkan {
             fbdesc.layers = 1;
             fbdesc.attachmentcount = depth != NULL ? 2 : 1;
             fbdesc.pass = pass; // XXX: How do we setup the renderpass for the backbuffer?
-            struct ORenderer::textureview attachments[] = { this->swaptextureviews[i], *depth };
+            struct ORenderer::textureview attachments[] = {
+                this->swaptextureviews[i],
+                depth != NULL ? *depth :
+                    (struct ORenderer::textureview) { RENDERER_INVALIDHANDLE }
+            };
             fbdesc.attachments = attachments;
             ASSERT(this->createframebuffer(&fbdesc, &this->swapfbs[i]) == ORenderer::RESULT_SUCCESS, "Failed to create Vulkan swapchain framebuffer.\n");
             char buf[64];
@@ -2316,8 +2429,12 @@ namespace OVulkan {
                 vkDestroyShaderModule(this->dev, vkpipelinestate.shaders[i], NULL);
             }
             vkDestroyPipelineLayout(this->dev, vkpipelinestate.pipelinelayout, NULL);
-            vkDestroyDescriptorSetLayout(this->dev, vkpipelinestate.descsetlayout, NULL);
+            // vkDestroyDescriptorSetLayout(this->dev, vkpipelinestate.descsetlayout, NULL);
             vkDestroyPipeline(this->dev, vkpipelinestate.pipeline, NULL);
+        }
+
+        for (auto it = this->layouts.begin(); it != this->layouts.end(); it++) {
+            vkDestroyDescriptorSetLayout(this->dev, it->second.vkresource.layout, NULL);
         }
 
         vkDestroyDescriptorPool(this->dev, this->descpool, NULL);
@@ -2386,9 +2503,18 @@ namespace OVulkan {
             ASSERT(OVulkan::extensions[i].optional || OVulkan::extensions[i].supported, "Required Vulkan extension %s is not present when needed for instance.\n", OVulkan::extensions[i].name);
         }
 
+        VkValidationFeaturesEXT vinfo = { };
+        vinfo.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
+        static const VkValidationFeatureEnableEXT enable_features[2] = {
+            VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
+            VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
+        };
+        vinfo.enabledValidationFeatureCount = 2;
+        vinfo.pEnabledValidationFeatures = enable_features;
+
         VkInstanceCreateInfo instancecreate = { };
         instancecreate.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-        instancecreate.pNext = NULL;
+        instancecreate.pNext = &vinfo;
         instancecreate.flags = 0;
         instancecreate.pApplicationInfo = &info;
         instancecreate.enabledLayerCount = 1;
@@ -2441,13 +2567,34 @@ namespace OVulkan {
         vkGetPhysicalDeviceFeatures(this->phy, &this->phyfeatures); // Get all to enable all
         VkPhysicalDeviceShaderDrawParametersFeatures shaderdraw = { };
         shaderdraw.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETER_FEATURES;
+        shaderdraw.pNext = NULL;
+        // shaderdraw.shaderDrawParameters = VK_TRUE;
+
+        VkPhysicalDeviceDescriptorIndexingFeatures indexing = { };
+        indexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+        indexing.pNext = &shaderdraw;
+
+        VkPhysicalDeviceBufferDeviceAddressFeatures bda = { };
+        bda.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+        bda.pNext = &indexing;
+        // we need this.
+        // bda.bufferDeviceAddress = VK_TRUE;
+        // we don't need these.
+        // bda.bufferDeviceAddressMultiDevice = VK_FALSE;
+        // bda.bufferDeviceAddressCaptureReplay = VK_FALSE;
+
 
         VkPhysicalDeviceFeatures2 extrafeatures = { };
         extrafeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        extrafeatures.pNext = &shaderdraw;
+        extrafeatures.pNext = &bda;
 
         vkGetPhysicalDeviceFeatures2(this->phy, &extrafeatures);
         ASSERT(shaderdraw.shaderDrawParameters == VK_TRUE, "Vulkan physical device does not have the required shader draw parameter feature.\n");
+        ASSERT(bda.bufferDeviceAddress == VK_TRUE, "Vulkan physical device does not have the required buffer device address feature.\n");
+        ASSERT(indexing.runtimeDescriptorArray == VK_TRUE, "Vulkan physical device does not have the required descriptor indexing features.\n");
+        ASSERT(indexing.descriptorBindingPartiallyBound == VK_TRUE, "Vulkan physical device does not have the required descriptor indexing features.\n");
+        ASSERT(indexing.shaderSampledImageArrayNonUniformIndexing == VK_TRUE, "Vulkan physical device does not have the required descriptor indexing features.\n");
+        ASSERT(indexing.shaderStorageBufferArrayNonUniformIndexing == VK_TRUE, "Vulkan physical device does not have the required descriptor indexing features.\n");
 
         checkextensions(this->phy, devextensions, sizeof(devextensions) / sizeof(devextensions[0]));
 
@@ -2534,7 +2681,7 @@ namespace OVulkan {
 
         VkDeviceCreateInfo devicecreate = { };
         devicecreate.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        devicecreate.pNext = &shaderdraw; // Pass on extra enabled features.
+        devicecreate.pNext = &bda; // Pass on extra enabled features.
         devicecreate.pQueueCreateInfos = queuecreate;
         devicecreate.queueCreateInfoCount = 2;
         devicecreate.pEnabledFeatures = &this->phyfeatures;
@@ -2578,6 +2725,7 @@ namespace OVulkan {
         // alloccreate.vulkanApiVersion = VK_VERSION_1_0;
         alloccreate.physicalDevice = this->phy;
         alloccreate.device = this->dev;
+        alloccreate.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT; // We use this feature, so enable it.
         alloccreate.instance = this->instance;
         alloccreate.pVulkanFunctions = &this->vmafunctions;
         vmaCreateAllocator(&alloccreate, &this->allocator);
@@ -2600,6 +2748,7 @@ namespace OVulkan {
         poolcreate.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         poolcreate.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         poolcreate.queueFamilyIndex = this->graphicscomputefamily;
+        poolcreate.pNext = NULL;
 
         res = vkCreateCommandPool(this->dev, &poolcreate, NULL, &this->cmdpool);
         ASSERT(res == VK_SUCCESS, "Failed to create Vulkan command pool %d.\n", res);
@@ -2630,6 +2779,9 @@ namespace OVulkan {
         this->imstream.context = this;
         this->imstream.primary = 2;
         this->imstream.cmd = this->imcmd;
+
+        // Initialise the stream pool.
+        this->streampool.init(this);
 
         VkSemaphoreCreateInfo semcreate = { };
         semcreate.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -2681,9 +2833,69 @@ namespace OVulkan {
         // for (size_t i = 0; i < RENDERER_MAXLATENCY; i++) {
             // this->cmdctx[i] = TracyVkContextCalibrated(this->instance, this->phy, this->dev, this->graphicsqueue, this->cmd[i], vkGetInstanceProcAddr, vkGetDeviceProcAddr);
         // }
+
+        ORenderer::setmanager.init(this);
+    }
+
+    void VulkanStreamPool::init(VulkanContext *ctx) {
+        this->freestream = &this->pool[0];
+        VkCommandBufferAllocateInfo info = { };
+        info.pNext = NULL;
+        info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        info.commandPool = ctx->cmdpool;
+        info.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+        info.commandBufferCount = VULKAN_POOLSIZE;
+        VkResult res = vkAllocateCommandBuffers(ctx->dev, &info, this->cmds);
+        ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan stream command buffer pool.\n");
+
+        for (size_t i = 0; i < VULKAN_POOLSIZE - 1; i++) {
+            this->pool[i].cmd = this->cmds[i];
+            this->pool[i].context = ctx;
+            this->pool[i].primary = 0;
+            this->pool[i].next = &this->pool[i + 1];
+        }
+
+        this->pool[VULKAN_POOLSIZE - 1].next = NULL;
+    }
+
+    uint64_t VulkanContext::getbufferref(struct ORenderer::buffer buffer, uint8_t latency) {
+        // XXX: Do this only at creation to avoid potential costs of the query if we do it regularly.
+        VkBufferDeviceAddressInfo info = { };
+        this->resourcemutex.lock();
+        info.buffer = this->buffers[buffer.handle].vkresource.buffer[latency == UINT8_MAX ? this->frame : latency];
+        info.pNext = NULL;
+        info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+        VkDeviceAddress addr = vkGetBufferDeviceAddressKHR(this->dev, &info);
+        this->resourcemutex.unlock();
+        return addr;
+    }
+
+    VulkanStream *VulkanStreamPool::alloc(void) {
+        ASSERT(this->freestream != NULL, "Empty Vulkan stream pool.\n");
+
+        this->spin.lock();
+
+        VulkanStream *stream = this->freestream;
+        this->freestream = stream->next;
+
+        this->spin.unlock();
+
+        return stream;
+    }
+
+    void VulkanStreamPool::free(VulkanStream *stream) {
+        ASSERT(stream != NULL, "Expected active stream, not NULL.\n");
+
+        this->spin.lock();
+        stream->next = this->freestream;
+        this->freestream = stream;
+        this->spin.unlock();
     }
 
     void VulkanContext::execute(GraphicsPipeline *pipeline, void *cam) {
+        ASSERT(pipeline != NULL, "Invalid pipeline.\n");
+        ASSERT(cam != NULL, "Invalid camera.\n");
+        ASSERT(this->frame < RENDERER_MAXLATENCY, "Invalid current frame!\n");
         vkWaitForFences(this->dev, 1, &this->framesinflight[this->frame], VK_TRUE, UINT64_MAX); // await frame completion (of previous version, if we recurse over our allowed latency we'll end up waiting for the original to complete)
 
         uint32_t image;

@@ -176,7 +176,8 @@ int main(int argc, const char **argv) {
     OScene::Test *m = OScene::GameObject::create<OScene::Test>();
     m->scene = &scene2;
     // test->flags |= OScene::GameObject::IS_INVISIBLE;
-    m->model->model = (new OResource::Resource("misc/test2.omod*", new ORenderer::Model("misc/test2.omod")))->gethandle();
+    OResource::manager.create("misc/test2.omod*", new ORenderer::Model("misc/test2.omod"));
+    m->model->model = OResource::manager.get("misc/test2.omod*");
     m->model->modelpath = "misc/test2.omod";
     printf("bounds.\n");
     m->bounds = OMath::AABB(m->model->model->as<ORenderer::Model>()->bounds.min, m->model->model->as<ORenderer::Model>()->bounds.max);

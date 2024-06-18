@@ -11,6 +11,7 @@ namespace ORenderer {
             struct texturepair {
                 struct texture texture;
                 struct textureview view;
+                uint32_t gpuid;
             };
 
             // Full PBR metallic roughness material pipeline
@@ -25,7 +26,6 @@ namespace ORenderer {
             float metallicfactor;
             float roughnessfactor;
     };
-
 }
 
 #endif

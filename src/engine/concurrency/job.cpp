@@ -10,6 +10,8 @@
 
 namespace OJob {
 
+
+
     // 15872 possible normal priority jobs, 512 high priority jobs (we expect there to be less of them).
     // consider increasing these queue sizes
     OUtils::MPMCQueue queues[OJob::Job::PRIORITY_COUNT] = { OUtils::MPMCQueue(16384), OUtils::MPMCQueue(512) };
@@ -81,6 +83,8 @@ namespace OJob {
         fibre->yieldstatus = status;
 
         COMPILER_BARRIER();
+        ASSERT(OJob::currentfibre != NULL, "Yield called outside of job system or with invalid fibre.\n");
+        ASSERT(OJob::currentworker != NULL, "Yield called outside of job system or with invalid worker.\n");
         swapcontext(&OJob::currentfibre->ctx, &OJob::currentworker->ctx); // Swap to worker context.
         // coroutine_yield(fibre->co);
     }
@@ -102,7 +106,7 @@ namespace OJob {
 
     void kickjobs(int count, OJob::Job *jobs[]) {
         ASSERT(count > 0, "Kicking zero jobs!\n");
-        for (size_t i = 0; i < count; i++) {
+        for (int i = 0; i < count; i++) {
             OJob::kickjob(jobs[i]);
         }
     }
@@ -123,6 +127,7 @@ namespace OJob {
                 OJob::Fibre **it = &this->waitlist[i];
                 ASSERT((*it) != NULL, "Invalid fibre on queue.\n");
                 ASSERT((*it)->job != NULL, "Fibre with invalid job on queue.\n");
+                ASSERT((*it)->job->priority < Job::PRIORITY_COUNT, "Fibre with invalid job priority.\n");
                 OJob::queues[(*it)->job->priority].push((*it)->job);
             }
 
@@ -155,32 +160,30 @@ namespace OJob {
             // while (this->ref.load() != 0) {
                 // asm ("pause");
             // }
-}
+        }
+    }
+
+    void Semaphore::wait(void) {
+        if (this->counter.ref.load() == 0) {
+            return; // Early exit if the couner is empty (aka. already triggered).
+        }
+
+        this->counter.wait(); // Just make us wait on a counter.
+    }
+
+    void Semaphore::trigger(void) {
+        this->counter.unreference(); // Unreferencing here will trigger a wake up on all waiting jobs.
     }
 
     std::atomic<size_t> mutexid;
 
     void Mutex::lock(void) {
-        ZoneScopedN("Mutex Lock");
-
-        // pthread_spin_lock(&this->spin);
-        // if (this->ref.load()) {
-            // size_t counter = 0;
-            // while (this->ref.load()) {
-                // if (counter++ > 100000000000) {
-                    // ASSERT(false, "Deadlock.\n");
-                // }
-            // }
-        // }
-
-        // this->ref.store(true);
-        // return;
-        // ASSERT(job_currentfibre != NULL, "Mutex lock outside of job system! Please use pthread spinlocks instead for synchronising current operations outside of Omicron's job system!\n");
-
+        // XXX: We can't use tracy scoped zoning on anything that yields mid way through or it'll mess up the fibre!.
         if (OJob::currentfibre == NULL) { // experimental outside-of-job-system mutex usage (doesn't even act as a mutex, just a simple spin lock)
             bool expected = false;
             // Ensure exclusive access, spurious failure lets us reduce power consumption during this.
-            while (this->ref.compare_exchange_weak(expected, true)) { // busy wait until ref is unlocked, then immediately acquire it.
+            // NOTE: I was a little silly here earlier and forgot that this will return false whenever we fail, this meant I was letting through operations that should otherwise be mutex locked if attempting to acquire them on the main thread.
+            while (!this->ref.compare_exchange_weak(expected, true)) { // busy wait until ref is unlocked, then immediately acquire it.
                 expected = false;
                 asm ("pause"); // Try to reduce load on the CPU during this (XXX: not non-x86 friendly!).
             }
@@ -215,7 +218,7 @@ namespace OJob {
         ASSERT(count > 0, "Kicking zero jobs!\n");
         OJob::Counter *initcounter = jobs[0]->counter;
         ASSERT(initcounter != NULL, "Attempting to kick a number of jobs and wait with no counter.\n");
-        for (size_t i = 1; i < count; i++) { // check if jobs all use the same counter
+        for (int i = 1; i < count; i++) { // check if jobs all use the same counter
             ASSERT(jobs[i]->counter == initcounter, "Expected jobs to all use the same counter!\n");
         }
         OJob::kickjobs(count, jobs);

@@ -8,17 +8,28 @@ layout(location = 5) in vec3 v_normal;
 
 layout(location = 0) out vec4 f_outcolour;
 
-layout(binding = 0) uniform ubo {
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_nonuniform_qualifier : require
+
+layout(push_constant, scalar) uniform constants {
+    uint samplerid;
+    uint baseid;
+    uint normalid;
+    uint mrid;
     mat4 model;
-    mat4 view;
-    mat4 proj;
     mat4 viewproj;
     vec3 pos;
-} u_ubo;
+} pcs;
 
-layout(binding = 1) uniform sampler2D s_texture;
-layout(binding = 2) uniform sampler2D s_normal;
-layout(binding = 3) uniform sampler2D s_mr;
+// layout(binding = 1) uniform sampler s_texture;
+// layout(binding = 2) uniform texture2D t_base;
+// layout(binding = 3) uniform sampler s_normal;
+// layout(binding = 4) uniform texture2D t_normal;
+// layout(binding = 5) uniform sampler s_mr;
+// layout(binding = 6) uniform texture2D t_mr;
+layout(binding = 0) uniform sampler samplers[1000];
+layout(binding = 1) uniform texture2D textures[1000];
 
 #define PI 3.141592653589793
 
@@ -97,20 +108,20 @@ vec3 sRGBToLinear(vec3 color) {
 
 void main() {
 
-    vec4 outcolour = texture(s_texture, v_texcoord);
+    vec4 outcolour = texture(nonuniformEXT(sampler2D(textures[pcs.baseid], samplers[pcs.samplerid])), v_texcoord);
     if (outcolour.a < 0.9) { // threshold
         discard;
     }
 
     // RM
-    vec2 metalrough = texture(s_mr, v_texcoord).bg;
+    vec2 metalrough = texture(nonuniformEXT(sampler2D(textures[pcs.mrid], samplers[pcs.samplerid])), v_texcoord).bg;
     float metallic = metalrough.x;
     float roughness = metalrough.y;
 
-    vec3 normal = texture(s_normal, v_texcoord).rgb * 2.0 - 1.0;
+    vec3 normal = texture(nonuniformEXT(sampler2D(textures[pcs.normalid], samplers[pcs.samplerid])), v_texcoord).rgb * 2.0 - 1.0;
     normal = normalize(v_tbn * normal);
 
-    vec3 viewdir = normalize(u_ubo.pos - v_position);
+    vec3 viewdir = normalize(pcs.pos - v_position);
 
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, outcolour.rgb, metallic);
