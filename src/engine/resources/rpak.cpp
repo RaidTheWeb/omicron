@@ -4,7 +4,6 @@
 
 namespace OResource {
 
-    // struct rpak_file *rpak_mount(const char *path) {
     RPak::RPak(const char *path) {
         ASSERT(path, "Mount NULL path.\n");
 
@@ -46,7 +45,6 @@ namespace OResource {
         return (struct RPak::stat) { .realsize = entry->compressed ? entry->compressedsize : entry->uncompressedsize, .decompressedsize = entry->uncompressedsize, .compressed = entry->compressed };
     }
 
-    // size_t rpak_read(struct rpak_file *file, const char *path, void *buf, size_t size, const size_t off) {
     size_t RPak::read(const char *path, void *buf, const size_t size, const size_t off) {
         ASSERT(path, "Attempting to read NULL file path.\n");
         ASSERT(buf, "Attempting to read into NULL buffer.\n");
@@ -68,21 +66,24 @@ namespace OResource {
             finalsize = size - ((off + size) - entry->uncompressedsize);
         }
         ASSERT(!fseek(this->file, entry->offset + off, SEEK_SET), "Failed to seek file offset for path `%s` in RPAK.\n", path);
-        if (!entry->compressed) {
+        if (true) {
             ASSERT(fread(buf, size, 1, this->file), "Failed to read file from RPAK.\n");
-        } else {
-            uint8_t *tbuf = (uint8_t *)malloc(entry->uncompressedsize + RPAK_COMPRESSIONFAULTTOLERANCE);
-            ASSERT(tbuf != NULL, "Failed to allocate memory for resulting decompression of file `%s` in RPAK.\n", path);
-            uint8_t *from = (uint8_t *)malloc(entry->compressedsize);
-            ASSERT(from != NULL, "Failed to allocate memory for reading compressed file `%s` in RPAK.\n", path);
-            ASSERT(!fseek(this->file, entry->offset, SEEK_SET), "Failed to seek beginning of file for path `%s` in RPAK.\n", path);
-            ASSERT(fread(from, entry->compressedsize, 1, this->file), "Failed to read compressed file data for path `%s` in RPAK.\n", path);
-            size_t decompressed = entry->uncompressedsize + RPAK_COMPRESSIONFAULTTOLERANCE;
-            int res = uncompress(tbuf, &decompressed, from, entry->compressedsize);
-            free(from);
-            ASSERT(res == Z_OK, "Failed to decompress RPAK file data.\n");
-            memcpy(buf, tbuf + off, size);
-            free(tbuf);
+        } else { // compressed stuff
+            ZoneScopedN("Compression read");
+            // XXX: FAR too expensive!
+        //     uint8_t *tbuf = (uint8_t *)malloc(entry->uncompressedsize + RPAK_COMPRESSIONFAULTTOLERANCE);
+        //     ASSERT(tbuf != NULL, "Failed to allocate memory for resulting decompression of file `%s` in RPAK.\n", path);
+        //     uint8_t *from = (uint8_t *)malloc(entry->compressedsize);
+        //     ASSERT(from != NULL, "Failed to allocate memory for reading compressed file `%s` in RPAK.\n", path);
+        //     ASSERT(!fseek(this->file, entry->offset, SEEK_SET), "Failed to seek beginning of file for path `%s` in RPAK.\n", path);
+        //     ASSERT(fread(from, entry->compressedsize, 1, this->file), "Failed to read compressed file data for path `%s` in RPAK.\n", path);
+        //     size_t decompressed = entry->uncompressedsize + RPAK_COMPRESSIONFAULTTOLERANCE;
+        //     {
+        //     int res = uncompress(tbuf, &decompressed, from, entry->compressedsize);
+        //     free(from);
+        //     ASSERT(res == Z_OK, "Failed to decompress RPAK file data.\n");
+        //     memcpy(buf, tbuf + off, size);
+        //     free(tbuf);
         }
         return size;
     }
@@ -115,7 +116,8 @@ namespace OResource {
                 ASSERT(!fseek(f, 0, SEEK_SET), "Failed to reset file pointer for RPAK packaging.\n");
                 entry.offset = 0;
                 strncpy(entry.path, dpath, 512);
-                entry.compressed = (entry.uncompressedsize > RPAK_COMPRESSBIAS);
+                // XXX: Too expensive
+                // entry.compressed = (entry.uncompressedsize > RPAK_COMPRESSBIAS);
 
                 uint8_t *fdata = (uint8_t *)malloc(entry.uncompressedsize);
                 ASSERT(fdata != NULL, "Failed to allocate memory for file data for RPAK packaging.\n");

@@ -66,7 +66,8 @@ static size_t listdir(int counter, char *path, char *gdpath, struct tableentry *
             fseek(f, 0, SEEK_SET);
             entry.offset = 0;
             strncpy(entry.path, dpath, 512);
-            entry.compressed = (entry.uncompressedsize > RPAK_COMPRESSBIAS);
+            // XXX: Too expensive
+            // entry.compressed = (entry.uncompressedsize > RPAK_COMPRESSBIAS);
 
             uint8_t *fdata = (uint8_t *)malloc(entry.uncompressedsize);
             ASSERT(fread(fdata, entry.uncompressedsize, 1, f), "Failed to read file for RPAK compression.\n");
@@ -171,11 +172,11 @@ void create(const char *path, const char *output) {
 
 int main(int argc, const char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: %s [input] [output]\n", argv[0]);
+        fprintf(stderr, "Usage: %s input output\n", argv[0]);
         return 1;
     }
 
-    create(argv[1], argv[2]);    
+    create(argv[1], argv[2]);
 
     return 0;
 }

@@ -451,6 +451,7 @@ namespace OVulkan {
     }
 
     void VulkanContext::endimmediate(void) {
+        ZoneScoped;
         vkEndCommandBuffer(this->imcmd);
 
         VkSubmitInfo submitinfo = { };
@@ -464,7 +465,71 @@ namespace OVulkan {
         vkWaitForFences(this->dev, 1, &this->imfence, VK_TRUE, UINT64_MAX); // Wait for the completion of this buffer before handing the control back to the CPU.
     }
 
-    static void transitionlayout(VkCommandBuffer cmd, struct texture *texture, size_t format, size_t state) {
+    VkPipelineStageFlags pipelinestageflags(size_t srcstage) {
+        return 0 |
+            (srcstage & ORenderer::PIPELINE_STAGEVERTEXSHADER ? VK_PIPELINE_STAGE_VERTEX_SHADER_BIT : 0) |
+            (srcstage & ORenderer::PIPELINE_STAGEVERTEXINPUT ? VK_PIPELINE_STAGE_VERTEX_INPUT_BIT : 0) |
+            (srcstage & ORenderer::PIPELINE_STAGETESSCONTROL ? VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT : 0) |
+            (srcstage & ORenderer::PIPELINE_STAGETESSEVALUATION ? VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT : 0) |
+            (srcstage & ORenderer::PIPELINE_STAGEGEOMETRY ? VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT : 0) |
+            (srcstage & ORenderer::PIPELINE_STAGEFRAGMENT ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : 0) |
+            (srcstage & ORenderer::PIPELINE_STAGECOMPUTE ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : 0) |
+            (srcstage & ORenderer::PIPELINE_STAGETRANSFER ? VK_PIPELINE_STAGE_TRANSFER_BIT : 0) |
+            (srcstage & ORenderer::PIPELINE_STAGEHOST ? VK_PIPELINE_STAGE_HOST_BIT : 0) |
+            (srcstage & ORenderer::PIPELINE_STAGEEARLYFRAG ? VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT : 0) |
+            (srcstage & ORenderer::PIPELINE_STAGELATEFRAG ? VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT : 0) |
+            (srcstage & ORenderer::PIPELINE_STAGETOP ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : 0) |
+            (srcstage & ORenderer::PIPELINE_STAGEBOTTOM ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : 0);
+    }
+
+    VkAccessFlags accessflags(size_t srcflags) {
+        return 0 |
+            (srcflags & ORenderer::ACCESS_MEMREAD ? VK_ACCESS_MEMORY_READ_BIT : 0) |
+            (srcflags & ORenderer::ACCESS_MEMWRITE ? VK_ACCESS_MEMORY_WRITE_BIT : 0) |
+            (srcflags & ORenderer::ACCESS_COLOURREAD ? VK_ACCESS_COLOR_ATTACHMENT_READ_BIT : 0) |
+            (srcflags & ORenderer::ACCESS_COLOURWRITE ? VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT : 0) |
+            (srcflags & ORenderer::ACCESS_DEPTHREAD ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT : 0) |
+            (srcflags & ORenderer::ACCESS_DEPTHWRITE ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT : 0) |
+            (srcflags & ORenderer::ACCESS_TRANSFERREAD ? VK_ACCESS_TRANSFER_READ_BIT : 0) |
+            (srcflags & ORenderer::ACCESS_TRANSFERWRITE ? VK_ACCESS_TRANSFER_WRITE_BIT : 0) |
+            (srcflags & ORenderer::ACCESS_HOSTREAD ? VK_ACCESS_HOST_READ_BIT : 0) |
+            (srcflags & ORenderer::ACCESS_HOSTWRITE ? VK_ACCESS_HOST_WRITE_BIT : 0) |
+            (srcflags & ORenderer::ACCESS_SHADERREAD ? VK_ACCESS_SHADER_READ_BIT : 0) |
+            (srcflags & ORenderer::ACCESS_SHADERWRITE ? VK_ACCESS_SHADER_WRITE_BIT : 0) |
+            (srcflags & ORenderer::ACCESS_INPUTREAD ? VK_ACCESS_INPUT_ATTACHMENT_READ_BIT : 0);
+    }
+
+    static void barrier(VkCommandBuffer cmd, struct texture *texture, size_t format, size_t oldlayout, size_t newlayout, size_t srcstage, size_t dststage, size_t srcaccess, size_t dstaccess, size_t basemip, size_t mipcount, size_t baselayer, size_t layercount) {
+        VkImageMemoryBarrier barrier = { };
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.pNext = NULL;
+        barrier.oldLayout = layouttable[oldlayout];
+        barrier.newLayout = layouttable[newlayout];
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = texture->image;
+        barrier.subresourceRange.baseMipLevel = basemip;
+        barrier.subresourceRange.levelCount = mipcount != SIZE_MAX ? mipcount : VK_REMAINING_MIP_LEVELS;
+        barrier.subresourceRange.baseArrayLayer = baselayer;
+        barrier.subresourceRange.layerCount = layercount != SIZE_MAX ? layercount : VK_REMAINING_ARRAY_LAYERS;
+        barrier.subresourceRange.aspectMask =
+            // colour format
+            (ORenderer::iscolourformat(format) ? VK_IMAGE_ASPECT_COLOR_BIT : 0) |
+            // depth format
+            (ORenderer::isdepthformat(format) ? VK_IMAGE_ASPECT_DEPTH_BIT : 0) |
+            // depth format with stencil
+            (ORenderer::isstencilformat(format) ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
+
+        VkPipelineStageFlags srcstagemask = pipelinestageflags(srcstage);
+        VkPipelineStageFlags dststagemask = pipelinestageflags(dststage);
+
+        barrier.srcAccessMask = accessflags(srcaccess);
+        barrier.dstAccessMask = accessflags(dstaccess);
+
+        vkCmdPipelineBarrier(cmd, srcstagemask, dststagemask, 0, 0, NULL, 0, NULL, 1, &barrier);
+    }
+
+    static void transitionlayout(VkCommandBuffer cmd, struct texture *texture, size_t format, size_t state, size_t basemip, size_t mipcount, size_t baselayer, size_t layercount) {
         VkImageMemoryBarrier barrier = { };
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         barrier.pNext = NULL;
@@ -473,10 +538,10 @@ namespace OVulkan {
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = texture->image;
-        barrier.subresourceRange.baseMipLevel = 0;
-        barrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
-        barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
+        barrier.subresourceRange.baseMipLevel = basemip;
+        barrier.subresourceRange.levelCount = mipcount != SIZE_MAX ? mipcount : VK_REMAINING_MIP_LEVELS;
+        barrier.subresourceRange.baseArrayLayer = baselayer;
+        barrier.subresourceRange.layerCount = layercount != SIZE_MAX ? layercount : VK_REMAINING_ARRAY_LAYERS;
         barrier.subresourceRange.aspectMask =
             // colour format
             (ORenderer::iscolourformat(format) ? VK_IMAGE_ASPECT_COLOR_BIT : 0) |
@@ -574,6 +639,9 @@ namespace OVulkan {
                 ASSERT(false, "Unknown Vulkan texture layout.\n");
                 break;
         }
+        // Remember to set avvess masks.
+        barrier.srcAccessMask = srcaccess;
+        barrier.dstAccessMask = dstaccess;
 
         vkCmdPipelineBarrier(cmd, srcstagemask, dststagemask, 0, 0, NULL, 0, NULL, 1, &barrier);
         texture->state = layouttable[state];
@@ -584,7 +652,7 @@ namespace OVulkan {
 
         resourcemutex.lock();
         struct texture *vktexture = &textures[texture.handle].vkresource;
-        OVulkan::transitionlayout(cmd, vktexture, format, state);
+        OVulkan::transitionlayout(cmd, vktexture, format, state, 0, SIZE_MAX, 0, SIZE_MAX);
         resourcemutex.unlock();
 
         this->endimmediate();
@@ -1809,7 +1877,7 @@ namespace OVulkan {
                     ZoneScopedN("OP_TRANSITIONLAYOUT");
                     // printf("OP_TRANSITIONLAYOUT\n");
                     struct texture *vktexture = &this->textures[it->layout.texture.handle].vkresource;
-                    OVulkan::transitionlayout(cmd, vktexture, it->layout.format, it->layout.state);
+                    // OVulkan::transitionlayout(cmd, vktexture, it->layout.format, it->layout.state);
                     break;
                 }
                 case ORenderer::Stream::OP_COMMITRESOURCES: {
@@ -2109,13 +2177,13 @@ namespace OVulkan {
         this->mappings.push_back((struct ORenderer::pipelinestateresourcemap) { .binding = binding, .type = type, .sampledbind = bind });
     }
 
-    void VulkanStream::transitionlayout(struct ORenderer::texture texture, size_t format, size_t state) {
+    void VulkanStream::barrier(struct ORenderer::texture texture, size_t format, size_t oldlayout, size_t newlayout, size_t srcstage, size_t dststage, size_t srcaccess, size_t dstaccess, size_t basemip, size_t mipcount, size_t baselayer, size_t layercount) {
         ZoneScoped;
         struct texture *vktexture = &this->context->textures[texture.handle].vkresource;
-        OVulkan::transitionlayout(this->cmd, vktexture, format, state);
+        OVulkan::barrier(this->cmd, vktexture, format, oldlayout, newlayout, srcstage, dststage, srcaccess, dstaccess, basemip, mipcount, baselayer, layercount);
     }
 
-    void VulkanStream::copybufferimage(struct ORenderer::bufferimagecopy region, struct ORenderer::buffer buffer, struct ORenderer::texture texture) {
+    void VulkanStream::copybufferimage(struct ORenderer::bufferimagecopy region, struct ORenderer::buffer buffer, struct ORenderer::texture texture, size_t layout) {
         ZoneScoped;
         struct buffer *vkbuffer = &this->context->buffers[buffer.handle].vkresource;
         struct texture *vktexture = &this->context->textures[texture.handle].vkresource;
@@ -2133,7 +2201,34 @@ namespace OVulkan {
         vkregion.imageSubresource.baseArrayLayer = region.baselayer;
         vkregion.imageExtent = { (uint32_t)region.imgextent.width, (uint32_t)region.imgextent.height, (uint32_t)region.imgextent.depth };
         vkregion.imageOffset = { (int32_t)region.imgoff.x, (int32_t)region.imgoff.y, (int32_t)region.imgoff.z };
-        vkCmdCopyBufferToImage(cmd, vkbuffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? vkbuffer->buffer[this->context->frame] : vkbuffer->buffer[0], vktexture->image, layouttable[vktexture->state], 1, &vkregion);
+        vkCmdCopyBufferToImage(cmd, vkbuffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? vkbuffer->buffer[this->context->frame] : vkbuffer->buffer[0], vktexture->image, layouttable[layout], 1, &vkregion);
+    }
+
+    void VulkanStream::copyimage(struct ORenderer::imagecopy region, struct ORenderer::texture src, struct ORenderer::texture dst, size_t srclayout, size_t dstlayout) {
+        ZoneScoped;
+        struct texture *vksrc = &this->context->textures[src.handle].vkresource;
+        struct texture *vkdst = &this->context->textures[dst.handle].vkresource;
+        VkImageCopy vkregion = { };
+        vkregion.srcOffset = { (int32_t)region.srcoff.x, (int32_t)region.srcoff.y, (int32_t)region.srcoff.z };
+        vkregion.dstOffset = { (int32_t)region.dstoff.x, (int32_t)region.dstoff.y, (int32_t)region.dstoff.z };
+        vkregion.extent = { (uint32_t)region.extent.width, (uint32_t)region.extent.height, (uint32_t)region.extent.depth };
+        vkregion.srcSubresource.mipLevel = region.srcmip;
+        vkregion.dstSubresource.mipLevel = region.dstmip;
+        vkregion.srcSubresource.baseArrayLayer = region.srcbaselayer;
+        vkregion.dstSubresource.baseArrayLayer = region.dstbaselayer;
+        vkregion.srcSubresource.layerCount = region.srclayercount;
+        vkregion.dstSubresource.layerCount = region.dstlayercount;
+        vkregion.srcSubresource.aspectMask =
+            (region.srcaspect & ORenderer::ASPECT_COLOUR ? VK_IMAGE_ASPECT_COLOR_BIT : 0) |
+            (region.srcaspect & ORenderer::ASPECT_DEPTH ? VK_IMAGE_ASPECT_DEPTH_BIT : 0) |
+            (region.srcaspect & ORenderer::ASPECT_STENCIL ? VK_IMAGE_ASPECT_STENCIL_BIT : 0) |
+            0;
+        vkregion.dstSubresource.aspectMask =
+            (region.dstaspect & ORenderer::ASPECT_COLOUR ? VK_IMAGE_ASPECT_COLOR_BIT : 0) |
+            (region.dstaspect & ORenderer::ASPECT_DEPTH ? VK_IMAGE_ASPECT_DEPTH_BIT : 0) |
+            (region.dstaspect & ORenderer::ASPECT_STENCIL ? VK_IMAGE_ASPECT_STENCIL_BIT : 0) |
+            0;
+        vkCmdCopyImage(cmd, vksrc->image, layouttable[srclayout], vkdst->image, layouttable[dstlayout], 1, &vkregion);
     }
 
     void VulkanStream::pushconstants(struct ORenderer::pipelinestate state, void *data, size_t size) {
@@ -2269,8 +2364,8 @@ namespace OVulkan {
         swapcreate.imageExtent = this->surfacecaps.currentExtent;
         swapcreate.imageArrayLayers = 1;
         swapcreate.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-        uint32_t indices[2] = { this->graphicscomputefamily, this->presentfamily };
-        if (this->graphicscomputefamily != this->presentfamily) {
+        uint32_t indices[2] = { this->initialfamily, this->presentfamily };
+        if (this->initialfamily != this->presentfamily) {
             swapcreate.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
             swapcreate.queueFamilyIndexCount = 2;
             swapcreate.pQueueFamilyIndices = indices;
@@ -2645,45 +2740,178 @@ namespace OVulkan {
         ASSERT(queueprops != NULL, "Failed to allocate memory for queue family properties.\n");
         vkGetPhysicalDeviceQueueFamilyProperties(this->phy, &queuefamilycount, queueprops);
 
+        bool asyncqueues = false; // A queue family exists separate from the main queue that can handle compute and transfer asynchronously
+        bool separatecomputeasync = false; // Async queue family has enough queues to be able to dedicate a queue to compute and transfer seperately.
+        bool presentseparate = false; // Present queue can be separated from the compute and transfer async queues.
+        bool presentoncompute = false; // Present queue is on the compute queue.
+        bool presentontransfer = false; // Present queue is on the transfer queue.
+        bool uniquecompute = false;
+        bool uniquetransfer = false;
+        bool uniquepresent = false;
+
+        bool foundinitial = false; // We know what our initial queue will be.
+        bool presentoninitial = false; // Present queue must be shared with the initial queue.
+
+        size_t initialfamily = SIZE_MAX;
+        size_t transferfamily = SIZE_MAX;
+        size_t computefamily = SIZE_MAX;
+        size_t presentfamily = SIZE_MAX;
+
         for (size_t i = 0; i < queuefamilycount; i++) {
             VkQueueFamilyProperties *props = &queueprops[i];
-            if ((props->queueFlags & VK_QUEUE_GRAPHICS_BIT) && (props->queueFlags & VK_QUEUE_COMPUTE_BIT)) { // find a queue that offers what we want
-                // this->globalqueuefamily = i;
-                this->graphicscomputefamily = i;
-            }
 
+            // Preliminary check
             VkBool32 presentsupported = VK_FALSE;
             res = vkGetPhysicalDeviceSurfaceSupportKHR(this->phy, i, this->surface, &presentsupported);
-            ASSERT(res == VK_SUCCESS, "Failed to gather support information on queue family %lu\n", i);
+            ASSERT(res == VK_SUCCESS, "Failed to find support information for queue family %lu.\n", i);
 
-            if (presentsupported) {
-                this->presentfamily = i;
+            if ((props->queueFlags & VK_QUEUE_GRAPHICS_BIT) && (props->queueFlags & VK_QUEUE_COMPUTE_BIT)) {
+                if (!foundinitial) { // This will be used as the initial queue.
+                    foundinitial = true;
+                    initialfamily = i;
+
+                    if (presentsupported && !uniquepresent && !presentseparate) {
+                        presentoninitial = true; // Present *is* supported on initial.
+                        presentfamily = i; // Figure out later if we should actually be doing this on this queue family.
+                    }
+                }
+            } else if ((props->queueFlags & VK_QUEUE_COMPUTE_BIT)) {
+                if (props->queueFlags & VK_QUEUE_TRANSFER_BIT) { // Queue family supports transfer as well
+                    asyncqueues = true; // Found both async queues.
+
+                    if (props->queueCount >= 2) { // This family supports enough queues for both transfer and compute asynchronously.
+                        separatecomputeasync = true;
+                        transferfamily = i;
+                        computefamily = i;
+                        if (props->queueCount >= 3) {
+                            if (presentsupported && !uniquepresent) { // This means we have enough extra space for the present queue to fit separate as well.
+                                presentseparate = true; // Enough for a separate queue.
+                                presentoninitial = false;
+                                presentfamily = i;
+                            }
+                        }
+                    } else {
+                        // Set anyway but keep in mind that we'll need to share! (unless something better comes along later)
+                        transferfamily = i;
+                        computefamily = i;
+
+                        // If present is supported, we open up the possibility of sharing the present queue with compute and transfer.
+                        if (!uniquepresent) {
+                            presentoncompute = presentsupported;
+                            presentontransfer = presentsupported;
+                        }
+                    }
+                } else {
+                    // Open up the possibility of putting the compute queue on here.
+                    if (!uniquepresent) {
+                        presentoncompute = presentsupported;
+                    }
+                    uniquecompute = true;
+                    computefamily = i; // Set up our async compute family anyway.
+                }
+            } else if ((props->queueFlags & VK_QUEUE_TRANSFER_BIT)) {
+                // We found a transfer queue.
+                transferfamily = i;
+                uniquetransfer = true;
+
+                // Open up the possibility of putting the present queue on here.
+                if (!uniquepresent) {
+                    presentontransfer = presentsupported;
+                }
+            } else if (presentsupported) { // Exclusive queue just for presentation!
+                uniquepresent = true;
+                presentfamily = i; // prefer this above everything else
             }
 
         }
         free(queueprops);
 
-        float queueprio = 1.0f;
-        VkDeviceQueueCreateInfo queuecreate[2];
-        queuecreate[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queuecreate[0].pNext = NULL;
-        queuecreate[0].queueCount = 1;
-        queuecreate[0].queueFamilyIndex = this->graphicscomputefamily;
-        queuecreate[0].pQueuePriorities = &queueprio;
-        queuecreate[0].flags = 0;
+        // TODO: More sophisticated! On some systems compute and graphics queues are set up differently or may require other special tricks. In that case we must introduce special cases to accomodate for correct queue creation. References to device queues themselves are not a problem as we can have a multiple references to the same queue for a number of different uses all at once. On the "user" end it all acts the same, but the GPU will end up bunching operations together sequentially or otherwise depending on the queue setup.
+        // Ideally we'd have a number of queues:
+        // - Typically queue 0 is Compute + Graphics + Transfer
+        // - Present queue
+        // - Async transfer queue
+        // - Async compute queue
+        // We are guaranteed the first queue to be as we expect it but other queues may share the same family. In an ideal scenario, the async transfer, async compute, and present queues would all be separate. However, it is not uncommon to find hardware that doesn't have the required number of possible queues available for allocation from the "async queue family"
+        // The benefits of having separate async queues is pretty clear, we can keep operations as concurrent as possible and avoid stalls where we have to wait for (ie.) a combined transfer+compute queue to finish its work on texture uploads only for the compute work to be performed.
 
-        queuecreate[1].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queuecreate[1].pNext = NULL;
-        queuecreate[1].queueCount = 1;
-        queuecreate[1].queueFamilyIndex = this->presentfamily;
-        queuecreate[1].pQueuePriorities = &queueprio;
-        queuecreate[1].flags = 0;
+        std::vector<VkDeviceQueueCreateInfo> queuecreate;
+        float prio = 1.0f;
+        ASSERT(foundinitial, "Failed to find a suitable queue family for main compute+rasterise setup!\n");
+
+        VkDeviceQueueCreateInfo queueinfo = { };
+        queueinfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueinfo.pNext = NULL;
+        queueinfo.queueCount = 1;
+        queueinfo.queueFamilyIndex = initialfamily;
+        queueinfo.pQueuePriorities = &prio;
+        queueinfo.flags = 0;
+        queuecreate.push_back(queueinfo);
+
+        if (uniquetransfer) {
+            queueinfo.queueCount = 1;
+            queueinfo.queueFamilyIndex = transferfamily;
+            queueinfo.pQueuePriorities = &prio;
+            queuecreate.push_back(queueinfo);
+        }
+
+        if (uniquecompute) {
+            queueinfo.queueCount = 1;
+            queueinfo.queueFamilyIndex = computefamily;
+            queueinfo.pQueuePriorities = &prio;
+            queuecreate.push_back(queueinfo);
+        }
+
+        if (uniquepresent) {
+            queueinfo.queueCount = 1;
+            queueinfo.queueFamilyIndex = presentfamily;
+            queueinfo.pQueuePriorities = &prio;
+            queuecreate.push_back(queueinfo);
+        }
+
+        if (asyncqueues) {
+            if (separatecomputeasync) {
+                if (presentseparate) {
+                    queueinfo.queueCount = 3;
+                } else {
+                    queueinfo.queueCount = 2;
+                }
+            } else {
+                queueinfo.queueCount = 1;
+            }
+            queueinfo.queueFamilyIndex = transferfamily; // doesn't matter which one here because they'll both end up pointing to the same thing.
+            queueinfo.pQueuePriorities = &prio;
+            queuecreate.push_back(queueinfo);
+        }
+
+        // float queueprio[3] = { 1.0f, 1.0f, 1.0f };
+        // VkDeviceQueueCreateInfo queuecreate[3];
+        // queuecreate[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        // queuecreate[0].pNext = NULL;
+        // queuecreate[0].queueCount = 1;
+        // queuecreate[0].queueFamilyIndex = this->graphicscomputefamily;
+        // queuecreate[0].pQueuePriorities = queueprio;
+        // queuecreate[0].flags = 0;
+        //
+        // queuecreate[1].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        // queuecreate[1].pNext = NULL;
+        // queuecreate[1].queueCount = 1;
+        // queuecreate[1].queueFamilyIndex = this->presentfamily;
+        // queuecreate[1].pQueuePriorities = queueprio;
+        // queuecreate[1].flags = 0;
+        //
+        // queuecreate[2].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        // queuecreate[2].pNext = NULL;
+        // queuecreate[2].queueCount = 1;
+        // queuecreate[2].queueFamilyIndex = this->transferfamily;
+        // queuecreate[2].pQueuePriorities = queueprio;
+        // queuecreate[2].flags = 0;
 
         VkDeviceCreateInfo devicecreate = { };
         devicecreate.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         devicecreate.pNext = &bda; // Pass on extra enabled features.
-        devicecreate.pQueueCreateInfos = queuecreate;
-        devicecreate.queueCreateInfoCount = 2;
+        devicecreate.pQueueCreateInfos = queuecreate.data();
+        devicecreate.queueCreateInfoCount = queuecreate.size();
         devicecreate.pEnabledFeatures = &this->phyfeatures;
         devicecreate.enabledExtensionCount = sizeof(devextensions) / sizeof(devextensions[0]);
 
@@ -2730,9 +2958,42 @@ namespace OVulkan {
         alloccreate.pVulkanFunctions = &this->vmafunctions;
         vmaCreateAllocator(&alloccreate, &this->allocator);
 
-        vkGetDeviceQueue(this->dev, this->graphicscomputefamily, 0, &this->graphicsqueue);
-        vkGetDeviceQueue(this->dev, this->graphicscomputefamily, 0, &this->computequeue);
-        vkGetDeviceQueue(this->dev, this->presentfamily, 0, &this->presentqueue);
+        this->initialfamily = initialfamily;
+        this->transferfamily = transferfamily;
+        this->computefamily = computefamily;
+        this->presentfamily = presentfamily;
+        vkGetDeviceQueue(this->dev, initialfamily, 0, &this->graphicsqueue);
+        vkGetDeviceQueue(this->dev, initialfamily, 0, &this->computequeue);
+        if (presentseparate) {
+            // Present separate on the last one.
+            vkGetDeviceQueue(this->dev, presentfamily, 2, &this->presentqueue);
+        } else if (presentoninitial && !presentoncompute && !presentontransfer) {
+            vkGetDeviceQueue(this->dev, presentfamily, 0, &this->presentqueue);
+        } else if (presentontransfer) {
+            vkGetDeviceQueue(this->dev, transferfamily, 0, &this->presentqueue);
+        } else if (presentoncompute) {
+            vkGetDeviceQueue(this->dev, computefamily, 0, &this->presentqueue);
+        } else if (uniquepresent) { // One for present.
+            vkGetDeviceQueue(this->dev, presentfamily, 0, &this->presentqueue);
+        }
+
+        if (separatecomputeasync) { // Separate queues.
+            vkGetDeviceQueue(this->dev, computefamily, 0, &this->asynccompute);
+            vkGetDeviceQueue(this->dev, transferfamily, 1, &this->asynctransfer);
+        } else if (uniquecompute) { // One for compute.
+            vkGetDeviceQueue(this->dev, computefamily, 0, &this->asynccompute);
+        } else if (uniquetransfer) { // One for transfer.
+            vkGetDeviceQueue(this->dev, transferfamily, 0, &this->asynctransfer);
+        } else if (asyncqueues) {
+            // Only one queue shared for all async ops.
+            vkGetDeviceQueue(this->dev, computefamily, 0, &this->asynccompute);
+            vkGetDeviceQueue(this->dev, transferfamily, 0, &this->asynctransfer);
+        } else { // All on initial
+            vkGetDeviceQueue(this->dev, initialfamily, 0, &this->asynccompute);
+            vkGetDeviceQueue(this->dev, initialfamily, 0, &this->asynctransfer);
+            this->computefamily  = initialfamily;
+            this->transferfamily = initialfamily;
+        }
 
         uint32_t formatcount = 0;
         vkGetPhysicalDeviceSurfaceFormatsKHR(this->phy, this->surface, &formatcount, NULL);
@@ -2744,10 +3005,11 @@ namespace OVulkan {
         this->createswapchain();
         this->createswapchainviews();
 
+        // XXX: Create pools for async queues!!!
         VkCommandPoolCreateInfo poolcreate = { };
         poolcreate.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         poolcreate.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        poolcreate.queueFamilyIndex = this->graphicscomputefamily;
+        poolcreate.queueFamilyIndex = this->initialfamily;
         poolcreate.pNext = NULL;
 
         res = vkCreateCommandPool(this->dev, &poolcreate, NULL, &this->cmdpool);
@@ -2801,7 +3063,11 @@ namespace OVulkan {
                 .descriptorCount = VULKAN_MAXDESCRIPTORS * 2,
             },
             (VkDescriptorPoolSize) {
-                .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .type = VK_DESCRIPTOR_TYPE_SAMPLER,
+                .descriptorCount = VULKAN_MAXDESCRIPTORS * 16
+            },
+            (VkDescriptorPoolSize) {
+                .type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
                 .descriptorCount = VULKAN_MAXDESCRIPTORS * 16
             },
             (VkDescriptorPoolSize) {

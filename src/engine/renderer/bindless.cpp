@@ -48,7 +48,7 @@ namespace ORenderer {
         this->textureids[POOLSIZE - 1].next = NULL;
     }
 
-    uint32_t BindlessManager::registersampler(struct sampler sampler) {
+    uint32_t BindlessManager::registersampler(struct sampler sampler, size_t layout) {
         ASSERT(sampler.handle != RENDERER_INVALIDHANDLE, "Invalid sampler.\n");
 
         ASSERT(this->freesampler != NULL, "Improper set management. No more free samplers.\n");
@@ -60,7 +60,7 @@ namespace ORenderer {
 
         struct samplerbind bind = { };
         bind.id = ret;
-        bind.layout = LAYOUT_SHADERRO;
+        bind.layout = layout;
         bind.sampler = sampler;
         this->context->updateset(this->set, &bind);
 
@@ -69,7 +69,7 @@ namespace ORenderer {
         return ret;
     }
 
-    uint32_t BindlessManager::registertexture(struct textureview texture) {
+    uint32_t BindlessManager::registertexture(struct textureview texture, size_t layout) {
         ASSERT(this->freetexture != NULL, "Improper set management. No more free texturess.\n");
 
         this->spin.lock();
@@ -79,12 +79,25 @@ namespace ORenderer {
 
         struct texturebind bind = { };
         bind.id = ret;
-        bind.layout = LAYOUT_SHADERRO;
+        bind.layout = layout;
         bind.view = texture;
         this->context->updateset(this->set, &bind);
         this->spin.unlock();
 
         return ret;
+    }
+
+    void BindlessManager::updatetexture(uint32_t id, struct textureview texture, size_t layout) {
+        ZoneScoped;
+        ASSERT(id < POOLSIZE, "Invalid ID.\n");
+
+        this->spin.lock();
+        struct texturebind bind = { };
+        bind.id = id;
+        bind.view = texture;
+        bind.layout = layout;
+        this->context->updateset(this->set, &bind);
+        this->spin.unlock();
     }
 
     void BindlessManager::removesampler(uint32_t id) {

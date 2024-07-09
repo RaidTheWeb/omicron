@@ -466,6 +466,22 @@ namespace ORenderer {
     };
 
     enum {
+        PIPELINE_STAGEVERTEXSHADER = (1 << 0),
+        PIPELINE_STAGEVERTEXINPUT = (1 << 1),
+        PIPELINE_STAGETESSCONTROL = (1 << 2),
+        PIPELINE_STAGETESSEVALUATION = (1 << 3),
+        PIPELINE_STAGEGEOMETRY = (1 << 4),
+        PIPELINE_STAGEFRAGMENT = (1 << 5),
+        PIPELINE_STAGECOMPUTE = (1 << 6),
+        PIPELINE_STAGETRANSFER = (1 << 7),
+        PIPELINE_STAGEHOST = (1 << 8),
+        PIPELINE_STAGEEARLYFRAG = (1 << 9),
+        PIPELINE_STAGELATEFRAG = (1 << 10),
+        PIPELINE_STAGETOP = (1 << 11),
+        PIPELINE_STAGEBOTTOM = (1 << 12)
+    };
+
+    enum {
         STAGE_VERTEX = (1 << 0),
         STAGE_TESSCONTROL = (1 << 1),
         STAGE_TESSEVALUATION = (1 << 2),
@@ -509,6 +525,22 @@ namespace ORenderer {
         LAYOUT_TRANSFERDST,
         LAYOUT_BACKBUFFER, // for most backends this just means colour attachment or something
         LAYOUT_COUNT
+    };
+
+    enum {
+        ACCESS_MEMREAD = (1 << 0),
+        ACCESS_MEMWRITE = (1 << 1),
+        ACCESS_COLOURREAD = (1 << 2),
+        ACCESS_COLOURWRITE = (1 << 3),
+        ACCESS_DEPTHREAD = (1 << 4),
+        ACCESS_DEPTHWRITE = (1 << 5),
+        ACCESS_TRANSFERREAD = (1 << 6),
+        ACCESS_TRANSFERWRITE = (1 << 7),
+        ACCESS_HOSTREAD = (1 << 8),
+        ACCESS_HOSTWRITE = (1 << 9),
+        ACCESS_INPUTREAD = (1 << 10),
+        ACCESS_SHADERREAD = (1 << 11),
+        ACCESS_SHADERWRITE = (1 << 12)
     };
 
     enum {
@@ -1142,6 +1174,24 @@ namespace ORenderer {
         size_t layercount;
     };
 
+    struct imagecopy {
+        glm::vec3 srcoff;
+        glm::vec3 dstoff;
+        struct {
+            size_t width;
+            size_t height;
+            size_t depth;
+        } extent;
+        uint8_t srcaspect;
+        uint8_t dstaspect;
+        size_t srcmip;
+        size_t dstmip;
+        size_t srcbaselayer;
+        size_t dstbaselayer;
+        size_t srclayercount;
+        size_t dstlayercount;
+    };
+
     struct sampledbind {
         struct sampler sampler;
         struct textureview view;
@@ -1442,7 +1492,7 @@ namespace ORenderer {
             }
 
             // Transition a texture between layouts.
-            virtual void transitionlayout(struct texture texture, size_t format, size_t state) {
+            virtual void barrier(struct texture texture, size_t format, size_t oldlayout, size_t newlayout, size_t srcstage, size_t dststage, size_t srcaccess, size_t dstaccess, size_t basemip = 0, size_t mipcount = SIZE_MAX, size_t baselayer = 0, size_t layercount = SIZE_MAX) {
                 // ZoneScoped;
                 // this->mutex.lock();
                 // this->cmd.push_back((struct streamnibble) { .type = OP_TRANSITIONLAYOUT, .layout = {
@@ -1451,13 +1501,17 @@ namespace ORenderer {
                 // this->mutex.unlock();
             }
 
-            virtual void copybufferimage(struct bufferimagecopy region, struct buffer buffer, struct texture texture) {
+            virtual void copybufferimage(struct bufferimagecopy region, struct buffer buffer, struct texture texture, size_t layout = LAYOUT_TRANSFERDST) {
                 // ZoneScoped;
                 // this->mutex.lock();
                 // this->cmd.push_back((struct streamnibble) { .type = OP_COPYBUFFERIMAGE, .copybufferimage =  {
                     // .region = region, .buffer = buffer, .texture = texture
                 // } });
                 // this->mutex.unlock();
+            }
+
+            virtual void copyimage(struct imagecopy region, struct texture src, struct texture dst, size_t srclayout = LAYOUT_TRANSFERSRC, size_t dstlayout = LAYOUT_TRANSFERDST) {
+
             }
 
             // Submit another stream's command list to the current command list (the result will be as if the commands were submitted to this current stream)

@@ -37,8 +37,10 @@ namespace ORenderer {
                 this->init(context);
             }
 
-            uint32_t registersampler(struct sampler sampler);
-            uint32_t registertexture(struct textureview texture);
+            uint32_t registersampler(struct sampler sampler, size_t layout = LAYOUT_SHADERRO);
+            uint32_t registertexture(struct textureview texture, size_t layout = LAYOUT_SHADERRO);
+            // Update existing texture bind in place with a new layout or view.
+            void updatetexture(uint32_t id, struct textureview texture, size_t layout = LAYOUT_SHADERRO);
             void removesampler(uint32_t id);
             void removetexture(uint32_t id);
     };

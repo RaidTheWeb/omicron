@@ -4,6 +4,7 @@
 #include <engine/assertion.hpp>
 #include <engine/ext/stb_ds.hpp>
 #include <engine/ext/stb_image.hpp>
+#include <engine/ext/stb_image_resize2.h>
 #include <sys/time.h>
 #include <stdio.h>
 #include <stdint.h>

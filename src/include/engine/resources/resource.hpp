@@ -24,8 +24,8 @@ namespace OResource {
 
             // load from RPak
             void loadrpak(RPak *rpak);
-            void create(const char *path);
-            void create(const char *path, void *src);
+            OUtils::Handle<Resource> create(const char *path);
+            OUtils::Handle<Resource> create(const char *path, void *src);
 
             OUtils::Handle<Resource> get(const char *path);
     };
@@ -47,11 +47,11 @@ namespace OResource {
             OJob::Mutex mutex; // only one thread may "own" the resource at any one time. use mutex here instead of spinlock as we can expect long busy-waits if we were to use a spinlock instead.
 
             enum srctype type;
-            RPak *rpak; // RPak
+            RPak *rpak = NULL; // RPak
             struct RPak::tableentry rpakentry; // RPak entry header
-            void *ptr; // virtual is a pointer to whatever source
-            const char *path; // path to file (either os filesystem or RPak)
-            size_t id; // unique resource ID.
+            void *ptr = NULL; // virtual is a pointer to whatever source
+            const char *path = NULL; // path to file (either os filesystem or RPak)
+            size_t id = SIZE_MAX; // unique resource ID.
 
             Resource() {
                 this->handle = manager.table.bind(this);

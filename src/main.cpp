@@ -17,6 +17,7 @@
 #include <string.h>
 #include <engine/renderer/backend/vulkan.hpp>
 #include <engine/renderer/pipeline/pbrpipeline.hpp>
+#include <engine/renderer/texture.hpp>
 
 #include <engine/resources/rpak.hpp>
 #include <engine/resources/texture.hpp>
@@ -99,6 +100,18 @@ int main(int argc, const char **argv) {
     pipeline.init();
 
     OResource::Model::fromassimp("misc/spray_paint_bottles_4k.gltf", "misc/test2.omod");
+    // OResource::Texture::convertstbi("misc/textures/spray_paint_bottles_diff_4k.jpg", "misc/test.otex", true);
+    // OResource::Texture::convertstbi("cppmoment.png", "test.otex", true);
+    // OResource::Texture::convertktx2("misc/out.ktx2", "out.otex");
+    OResource::manager.create("out.otex");
+    // OResource::manager.create("misc/test.otex");
+
+    ORenderer::TextureManager tmanager;
+    OUtils::Handle<OResource::Resource> tex = tmanager.create("misc/test.otex");
+    struct ORenderer::Texture::updateinfo info = { };
+    info.timestamp = utils_getcounter();
+    info.resolution = tex->as<ORenderer::Texture>()->headers.header.levelcount - 1;
+    // tex->as<ORenderer::Texture>()->meetresolution(info);
 
     // XXX:
     OScene::Scene scene2 = OScene::Scene();

@@ -5,6 +5,7 @@
 #include <engine/renderer/renderer.hpp>
 #include <engine/renderer/im3d.hpp>
 #include <engine/renderer/mesh.hpp>
+#include <engine/renderer/texture.hpp>
 #include <engine/resources/texture.hpp>
 
 struct ORenderer::pipelinestate state;
@@ -292,6 +293,8 @@ void PBRPipeline::update(uint64_t flags) {
 
 OScene::Scene scene;
 
+size_t frame = 0;
+size_t res = 0;
 void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
     ZoneScopedN("Pipeline Execute");
     int64_t now = utils_getcounter();
@@ -300,6 +303,25 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
     }
     float delta = (now - lastframetimestamp) / 1000000.0f;
     lastframetimestamp = now;
+
+    OUtils::Handle<OResource::Resource> tex = OResource::manager.get("misc/test.otex*");
+    if (res < tex->as<ORenderer::Texture>()->headers.header.levelcount && !(frame % 16)) {
+        struct ORenderer::Texture::updateinfo info = { };
+        info.timestamp = utils_getcounter();
+        info.resolution = res;
+        tex->as<ORenderer::Texture>()->meetresolution(info);
+        // if (frame > 6) {
+            // exit(1);
+        // }
+        res++;
+    } else if (res >= tex->as<ORenderer::Texture>()->headers.header.levelcount) {
+        printf("downgrade.\n");
+        struct ORenderer::Texture::updateinfo info = { };
+        info.timestamp = utils_getcounter();
+        info.resolution = 6;
+        tex->as<ORenderer::Texture>()->meetresolution(info);
+    }
+    frame++;
 
     struct ORenderer::clearcolourdesc colourdesc = { };
     colourdesc.count = 2;
@@ -349,6 +371,7 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
 
     ORenderer::PerspectiveCamera tcamera = ORenderer::PerspectiveCamera(glm::vec3(2.0f, 0.0f, -10.0f), glm::rotate(orientation, glm::radians(10.0f) * (float)glfwGetTime(), glm::vec3(0.0f, 1.0f, 0.0f)), 45.0f, renderrect.width / (float)renderrect.height, 0.1f, 1000.0f);
 
+    // XXX: This would be done asynchronously! Cull while we do other important work on this thread instead of waiting on this!
     OScene::CullResult *res = scene.partitionmanager.cull(*camera);
     TracyMessageL("Done Culling");
     OScene::CullResult *reshead = res;
@@ -376,11 +399,12 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
                     for (size_t i = 0; i < model->model->as<ORenderer::Model>()->meshes.size(); i++) {
                         data.sampler = samplerid;
                         // XXX: Compress into material ID system.
-                        data.base = model->model->as<ORenderer::Model>()->meshes[i].material.base.gpuid;
+                        // data.base = model->model->as<ORenderer::Model>()->meshes[i].material.base.gpuid;
+                        data.base = 0;
                         data.normal = model->model->as<ORenderer::Model>()->meshes[i].material.normal.gpuid;
                         data.mrid = model->model->as<ORenderer::Model>()->meshes[i].material.mr.gpuid;
                         data.model = obj->getglobalmatrix();
-                        data.viewproj = camera->getviewproj(); // precalculated combination (so we don't have to do this calculation per fragment, this could be extended still by precalculating the mvp)
+                        data.viewproj = camera->getviewproj(); // precalculated combination (so we don't have to do this calculation per fragment, this could be extendedll by precalculating the mvp)
                         data.campos = camera->pos;
 
                         {

@@ -302,9 +302,10 @@ namespace OVulkan {
             void bindset(struct ORenderer::resourceset set);
 
             // Transition a texture between layouts.
-            void transitionlayout(struct ORenderer::texture texture, size_t format, size_t state);
+            void barrier(struct ORenderer::texture texture, size_t format, size_t oldlayout, size_t newlayout, size_t srcstage, size_t dststage, size_t srcaccess, size_t dstaccess, size_t basemip = 0, size_t mipcount = SIZE_MAX, size_t baselayer = 0, size_t layercount = SIZE_MAX);
 
-            void copybufferimage(struct ORenderer::bufferimagecopy region, struct ORenderer::buffer buffer, struct ORenderer::texture texture);
+            void copybufferimage(struct ORenderer::bufferimagecopy region, struct ORenderer::buffer buffer, struct ORenderer::texture texture, size_t layout);
+            void copyimage(struct ORenderer::imagecopy region, struct ORenderer::texture src, struct ORenderer::texture dst, size_t srclayout, size_t dstlayout);
 
             // Submit another stream's command list to the current command list (the result will be as if the commands were submitted to this current stream)
             void submitstream(ORenderer::Stream *stream);
@@ -379,13 +380,18 @@ namespace OVulkan {
             VkInstance instance;
             void *vulkanlib;
 
-            uint32_t globalqueuefamily;
-            VkQueue globalqueue;
-            uint32_t graphicscomputefamily;
+            uint32_t initialfamily;
+            uint32_t transferfamily;
+            uint32_t computefamily;
+            uint32_t presentfamily;
             VkQueue graphicsqueue;
             VkQueue computequeue;
-            uint32_t presentfamily;
+            VkQueue transferqueue;
             VkQueue presentqueue;
+            // Are these queues actually asynchronous?
+            bool asyncqueues;
+            VkQueue asynccompute;
+            VkQueue asynctransfer;
 
             VkSurfaceKHR surface;
             VkSurfaceCapabilitiesKHR surfacecaps;

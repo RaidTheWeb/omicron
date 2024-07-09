@@ -1,4 +1,5 @@
 #define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
 #define STB_DS_IMPLEMENTATION
 #include <ktx.h>
 #include <stdlib.h>

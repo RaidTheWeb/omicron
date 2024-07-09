@@ -9,6 +9,145 @@
 namespace OResource {
     class Texture {
         public:
+            struct header {
+                char magic[5]; // OTEX\0
+                uint32_t type; // Image type (2D, 3D, etc.)
+                uint32_t format; // Generic format for the image.
+                uint32_t width; // Width (assumed to be the lowest mip level)
+                uint32_t height; // Height (assumed to be the lowest mip level)
+                uint32_t depth; // Depth
+                uint32_t facecount;
+                uint32_t layercount; // Number of layers in the image (or faces on a cubemap).
+                uint32_t levelcount; // Mipmap levels
+                uint32_t compression; // Compression enabled? (and what kind? supercompression? CPU-only?)
+            };
+
+            struct levelhdr {
+                size_t offset; // Offset of mip level data within the file
+                size_t size; // Size of texture data (will be the compressed size if the texture is marked to use host or GPU compression)
+                size_t uncompressedsize; // Will represent the original data size (differing from the compressed data size) only *if* the texture is marked to use host compression or supercompression
+                uint32_t level;
+            };
+
+            struct loaded {
+                OUtils::Handle<OResource::Resource> resource;
+                struct header header;
+                struct levelhdr *levels;
+            };
+
+            struct work  {
+                ktxTexture *texture;
+                struct header *header;
+                size_t *offset;
+                FILE *f;
+            };
+
+            // Every mip level stores its internal byte data formatted by encapsulating layers, faces, and pixels in a tightly packed format.
+            // layers
+            //      - faces
+            //          - depth
+            //              - raw pixel data
+            // This layout transfers over to the GPU in about the same layout. Thanks to each level being separated this way, a single mip upload through texture streaming will upload the layers, faces, and pixels over in one upload.
+
+            static struct loaded loadheaders(OUtils::Handle<OResource::Resource> resource);
+            // Load individual mip level into a buffer (XXX: level here represents the index inside the texture file, which is (0 - mip) + levelcount where mip is the typical GPU representation, this is because level headers are stored in reverse order in OTexture files (basically to enable incremental reads for streaming)).
+            static void loadlevel(struct loaded &loaded, uint32_t level, OUtils::Handle<Resource> resource, void *data, size_t size, size_t offset = 0);
+            static struct loaded loadheaders(const char *path) {
+                return loadheaders(manager.get(path));
+            }
+            static void convertktx2(const char *path, const char *out);
+            static void convertstbi(const char *path, const char *out, bool mips = false);
+
+            // Deduce bytes per pixel based on format.
+            static uint8_t strideformat(uint8_t format) {
+                switch (format) {
+                    case ORenderer::FORMAT_RGBA4:
+                    case ORenderer::FORMAT_BGRA4:
+
+                    case ORenderer::FORMAT_R5G6B5:
+                    case ORenderer::FORMAT_B5G6R5:
+
+                    case ORenderer::FORMAT_RGB5A1:
+                    case ORenderer::FORMAT_BGR5A1:
+
+                    case ORenderer::FORMAT_RG8:
+                    case ORenderer::FORMAT_RG8U:
+                    case ORenderer::FORMAT_RG8I:
+                    case ORenderer::FORMAT_RG8SRGB:
+
+                    case ORenderer::FORMAT_R16:
+                    case ORenderer::FORMAT_R16S:
+                    case ORenderer::FORMAT_R16U:
+                    case ORenderer::FORMAT_R16I:
+                    case ORenderer::FORMAT_R16F:
+
+                    case ORenderer::FORMAT_D16:
+                        return 2;
+
+                    case ORenderer::FORMAT_RGB8:
+                    case ORenderer::FORMAT_RGB8S:
+                    case ORenderer::FORMAT_RGB8U:
+                    case ORenderer::FORMAT_RGB8I:
+                    case ORenderer::FORMAT_RGB8SRGB:
+                        return 3;
+
+                    case ORenderer::FORMAT_RGBA8:
+                    case ORenderer::FORMAT_RGBA8S:
+                    case ORenderer::FORMAT_RGBA8U:
+                    case ORenderer::FORMAT_RGBA8I:
+                    case ORenderer::FORMAT_RGBA8SRGB:
+
+                    case ORenderer::FORMAT_BGRA8U:
+                    case ORenderer::FORMAT_BGRA8S:
+                    case ORenderer::FORMAT_BGRA8I:
+                    case ORenderer::FORMAT_BGRA8SRGB:
+
+                    case ORenderer::FORMAT_RG16:
+                    case ORenderer::FORMAT_RG16S:
+                    case ORenderer::FORMAT_RG16U:
+                    case ORenderer::FORMAT_RG16I:
+                    case ORenderer::FORMAT_RG16F:
+
+                    case ORenderer::FORMAT_R32U:
+                    case ORenderer::FORMAT_R32I:
+                    case ORenderer::FORMAT_R32F:
+                    case ORenderer::FORMAT_D32F:
+                    case ORenderer::FORMAT_D16S8U:
+                    case ORenderer::FORMAT_D24S8U:
+                        return 4;
+
+                    case ORenderer::FORMAT_RGB16:
+                    case ORenderer::FORMAT_RGB16S:
+                    case ORenderer::FORMAT_RGB16U:
+                    case ORenderer::FORMAT_RGB16I:
+                    case ORenderer::FORMAT_RGB16F:
+                        return 6;
+
+                    case ORenderer::FORMAT_RGBA16:
+                    case ORenderer::FORMAT_RGBA16S:
+                    case ORenderer::FORMAT_RGBA16U:
+                    case ORenderer::FORMAT_RGBA16I:
+                    case ORenderer::FORMAT_RGBA16F:
+
+                    case ORenderer::FORMAT_RG32F:
+                        return 8;
+                    case ORenderer::FORMAT_RGB32F:
+                    case ORenderer::FORMAT_D32FS8U:
+                        return 12;
+                    case ORenderer::FORMAT_RGBA32U:
+                    case ORenderer::FORMAT_RGBA32I:
+                    case ORenderer::FORMAT_RGBA32F:
+                        return 16;
+                    case ORenderer::FORMAT_R8:
+                    case ORenderer::FORMAT_R8S:
+                    case ORenderer::FORMAT_R8U:
+                    case ORenderer::FORMAT_R8I:
+                    case ORenderer::FORMAT_R8SRGB:
+                    default:
+                        return 1;
+                }
+            }
+
             static uint8_t convertformat(uint32_t vkformat) {
                 switch (vkformat) {
                     // Vulkan to our render format (since KTX2 provides us a vulkan format member already!)
@@ -96,27 +235,59 @@ namespace OResource {
                 ORenderer::context->unmapbuffer(stagingmap);
 
                 ORenderer::Stream *stream = ORenderer::context->getimmediate();
-                struct ORenderer::bufferimagecopy region = { };
-                region.offset = 0;
-                region.rowlen = 0;
-                region.imgheight = 0;
-                region.imgoff = { 0, 0, 0 };
-                region.imgextent = { desc->width, desc->height, desc->depth };
-                region.aspect = ORenderer::ASPECT_COLOUR;
-                region.mip = 0;
-                region.baselayer = 0;
-                region.layercount = desc->layers;
 
                 struct ORenderer::texture texture;
-
                 ORenderer::context->createtexture(desc, &texture);
 
                 stream->claim();
                 stream->begin();
 
-                stream->transitionlayout(texture, desc->format, ORenderer::LAYOUT_TRANSFERDST);
-                stream->copybufferimage(region, staging, texture);
-                stream->transitionlayout(texture, desc->format, ORenderer::LAYOUT_SHADERRO);
+                // Derive the size of the minimum.
+                size_t width = glm::max(1.0f, floor((float)desc->width / (1 << (desc->mips - 1))));
+                size_t height = glm::max(1.0f, floor((float)desc->height / (1 << (desc->mips - 1))));
+                size_t depth = desc->depth;
+                size_t offset = 0;
+
+                size_t layout = ORenderer::LAYOUT_UNDEFINED;
+                size_t stage = ORenderer::PIPELINE_STAGETOP;
+                for (ssize_t i = desc->mips - 1; i >= 0; i--) {
+                    // We include the transitions here as they force a barrier around the memory.
+                    stream->barrier(
+                        texture, desc->format, layout, ORenderer::LAYOUT_TRANSFERDST,
+                        stage, ORenderer::PIPELINE_STAGETRANSFER, // undefined/shaderro -> transfer dst
+                        layout == ORenderer::LAYOUT_UNDEFINED ? 0 : ORenderer::ACCESS_SHADERREAD | ORenderer::ACCESS_INPUTREAD,
+                        ORenderer::ACCESS_TRANSFERWRITE
+                    );
+                    stage = ORenderer::PIPELINE_STAGETRANSFER;
+                    layout = ORenderer::LAYOUT_TRANSFERDST;
+                    struct ORenderer::bufferimagecopy region = { };
+                    region.offset = offset;
+                    region.rowlen = width;
+                    region.imgheight = height;
+                    region.imgoff = { 0, 0, 0 };
+                    region.imgextent = { .width = width, .height = height, .depth = depth };
+                    region.aspect = ORenderer::ASPECT_COLOUR;
+                    region.mip = i;
+                    region.baselayer = 0;
+                    region.layercount = desc->layers;
+                    offset += (width * height * depth * strideformat(desc->format)); // XXX: Does not respect block sizes.
+
+                    stream->copybufferimage(region, staging, texture);
+                    stream->barrier(
+                        texture, desc->format, layout, ORenderer::LAYOUT_SHADERRO,
+                        stage, ORenderer::PIPELINE_STAGEFRAGMENT, // transfer dst -> shaderro
+                        ORenderer::ACCESS_TRANSFERWRITE, ORenderer::ACCESS_SHADERREAD | ORenderer::ACCESS_INPUTREAD
+                    );
+                    stage = ORenderer::PIPELINE_STAGEFRAGMENT;
+                    layout = ORenderer::LAYOUT_SHADERRO;
+                    if (width == desc->width && height == desc->height) {
+                        break;
+                    }
+
+                    // Decrease scale by power of two.
+                    width <<= 1;
+                    height <<= 1;
+                }
 
                 stream->end();
                 stream->release();
@@ -124,6 +295,8 @@ namespace OResource {
                 ORenderer::context->destroybuffer(&staging);
                 return texture;
             }
+
+            static struct ORenderer::texture texload(OUtils::Handle<Resource> resource);
 
             static struct ORenderer::texture ktxload(OUtils::Handle<Resource> resource) {
                 ASSERT(resource != RESOURCE_INVALIDHANDLE, "Attempting to load texture from invalid resource.\n");
@@ -313,6 +486,8 @@ namespace OResource {
                 // XXX: File type inference?
                 if (endswith(path, ".ktx2")) {
                     return ktxload(manager.get(path));
+                } else if (endswith(path, ".otex")) {
+                    return texload(manager.get(path));
                 } else if (endswith(path, ".png") || endswith(path, ".jpg") || endswith(path, ".jpeg")) { // All handled with stbi.
                     return stbiload(manager.get(path));
                 } else {

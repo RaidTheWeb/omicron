@@ -429,14 +429,14 @@ namespace ORenderer {
                 ASSERT(pixels != NULL, "Failed to load font texture.\n");
 
                 struct ORenderer::buffer staging = { };
-                ASSERT(ORenderer::context->createbuffer(
+                ORenderer::context->createbuffer(
                     &staging, size, ORenderer::BUFFER_TRANSFERSRC,
                     ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPUCOHERENT | ORenderer::MEMPROP_CPUSEQUENTIALWRITE,
                     0
-                ) == ORenderer::RESULT_SUCCESS, "Failed to create staging buffer.\n");
+                );
 
                 struct ORenderer::buffermap stagingmap = { };
-                ASSERT(ORenderer::context->mapbuffer(&stagingmap, staging, 0, size) == ORenderer::RESULT_SUCCESS, "Failed to map staging buffer.\n");
+                ORenderer::context->mapbuffer(&stagingmap, staging, 0, size);
                 memcpy(stagingmap.mapped[0], pixels, size);
                 ORenderer::context->unmapbuffer(stagingmap);
 
@@ -463,17 +463,25 @@ namespace ORenderer {
                 desc.samples = ORenderer::SAMPLE_X1;
                 desc.usage = ORenderer::USAGE_SAMPLED | ORenderer::USAGE_DST;
 
-                ASSERT(ORenderer::context->createtexture(
+                ORenderer::context->createtexture(
                     &this->font, ORenderer::IMAGETYPE_2D, width, height,
                     1, 1, 1, ORenderer::FORMAT_RGBA8, ORenderer::MEMLAYOUT_OPTIMAL,
                     ORenderer::USAGE_SAMPLED | ORenderer::USAGE_DST, ORenderer::SAMPLE_X1
-                ) == ORenderer::RESULT_SUCCESS, "Failed to create font texture.\n");
+                );
 
                 stream->claim();
                 stream->begin();
-                stream->transitionlayout(this->font, desc.format, ORenderer::LAYOUT_TRANSFERDST);
+                stream->barrier(
+                    this->font, desc.format, ORenderer::LAYOUT_UNDEFINED, ORenderer::LAYOUT_TRANSFERDST,
+                    ORenderer::PIPELINE_STAGETOP, ORenderer::PIPELINE_STAGETRANSFER, 0,
+                    ORenderer::ACCESS_TRANSFERWRITE
+                );
                 stream->copybufferimage(region, staging, this->font);
-                stream->transitionlayout(this->font, desc.format, ORenderer::LAYOUT_SHADERRO);
+                stream->barrier(
+                    this->font, desc.format, ORenderer::LAYOUT_TRANSFERDST, ORenderer::LAYOUT_SHADERRO,
+                    ORenderer::PIPELINE_STAGETRANSFER, ORenderer::PIPELINE_STAGEFRAGMENT,
+                    ORenderer::ACCESS_TRANSFERWRITE, ORenderer::ACCESS_SHADERREAD | ORenderer::ACCESS_INPUTREAD
+                );
                 stream->end();
                 stream->release();
 
@@ -484,17 +492,17 @@ namespace ORenderer {
                 // XXX: Consider making the upload system a separate system rather than just this.
 
                 // Create a big SSBO for vertex and index buffer data.
-                ASSERT(context->createbuffer(
+                ORenderer::context->createbuffer(
                     &this->ssbo, this->vtxbuffersize + this->idxbuffersize,
                     ORenderer::BUFFER_STORAGE,
                     ORenderer::MEMPROP_GPULOCAL | ORenderer::MEMPROP_CPUVISIBLE | ORenderer::MEMPROP_CPURANDOMACCESS | ORenderer::MEMPROP_CPUCOHERENT,
                     ORenderer::BUFFERFLAG_PERFRAME
-                ) == ORenderer::RESULT_SUCCESS, "Failed to create buffer.\n");
+                );
 
-                ASSERT(context->mapbuffer(
+                ORenderer::context->mapbuffer(
                     &this->ssbomap, this->ssbo, 0,
                     this->vtxbuffersize + this->idxbuffersize
-                ) == ORenderer::RESULT_SUCCESS, "Failed to map buffer.\n");
+                );
 
                 pcs.vtx = context->getbufferref(this->ssbo);
                 pcs.idx = pcs.vtx + this->vtxbuffersize; // Simple pointer arithmetic to point to our buffer.
@@ -508,16 +516,15 @@ namespace ORenderer {
                 viewdesc.baselayer = 0;
                 viewdesc.layercount = 1;
                 viewdesc.basemiplevel = 0;
-                ASSERT(ORenderer::context->createtextureview(
+                ORenderer::context->createtextureview(
                     &this->fontview, ORenderer::FORMAT_RGBA8, this->font,
-                    ORenderer::IMAGETYPE_2D, ORenderer::ASPECT_COLOUR,
-                    0, 1, 0, 1
-                ) == ORenderer::RESULT_SUCCESS, "Failed to create view of font texture.\n");
+                    ORenderer::IMAGETYPE_2D, ORenderer::ASPECT_COLOUR, 0, 1, 0, 1
+                );
 
-                ASSERT(ORenderer::context->createsampler(
+                ORenderer::context->createsampler(
                     &this->fontsampler, ORenderer::FILTER_NEAREST, ORenderer::FILTER_NEAREST,
                     ORenderer::ADDR_CLAMPEDGE, 0.0f, false, 1.0f
-                ) == ORenderer::RESULT_SUCCESS, "Failed to create font texture sampler.\n");
+                );
 
                 this->samplerid = this->bindless.registersampler(this->fontsampler);
                 this->pcs.sampler = this->samplerid;
@@ -591,7 +598,7 @@ namespace ORenderer {
 
                 // Renderpass
                 struct backbufferinfo backbufferinfo = { };
-                ASSERT(context->requestbackbufferinfo(&backbufferinfo) == ORenderer::RESULT_SUCCESS, "Failed to request backbuffer information.\n");
+                ORenderer::context->requestbackbufferinfo(&backbufferinfo);
 
                 struct rtattachmentdesc rtattachment = { };
                 rtattachment.format = backbufferinfo.format; // since we're going to be using the backbuffer as our render attachment we have to use the format we specified
@@ -637,10 +644,10 @@ namespace ORenderer {
                 rpasscreate.colourrefs = &colourref;
                 rpasscreate.depthref = &depthref;
 
-                ASSERT(context->createrenderpass(
+                ORenderer::context->createrenderpass(
                     &this->rpass, 2, attachments,
                     1, &colourref, &depthref
-                ) == ORenderer::RESULT_SUCCESS, "Failed to create render pass.\n");
+                );
 
 
                 struct pipelinestatedesc pdesc = { };
@@ -659,7 +666,7 @@ namespace ORenderer {
                 pdesc.depthstencil = &depthstencildesc;
                 pdesc.multisample = &multisample;
                 pdesc.reslayout = &this->bindless.layout;
-                ASSERT(context->createpipelinestate(&pdesc, &this->state) == ORenderer::RESULT_SUCCESS, "Failed to create pipeline state.\n");
+                ORenderer::context->createpipelinestate(&pdesc, &this->state);
             }
 
             void drawcmd(uint32_t width, uint32_t height, Stream *stream, const ImDrawCmd *cmd, ImVec2 clipoff, ImVec2 clipscale, size_t idxoff, size_t vtxoff) {

@@ -18,15 +18,19 @@ namespace OResource {
         }
     }
 
-    void ResourceManager::create(const char *path) {
+    OUtils::Handle<Resource> ResourceManager::create(const char *path) {
         ASSERT(path != NULL, "Invalid path given to resource manager create.\n");
-        this->resources[OUtils::fnv1a(path, strlen(path), FNV1A_SEED)] = new Resource(path);
+        Resource *ret = new Resource(path);
+        this->resources[OUtils::fnv1a(path, strlen(path), FNV1A_SEED)] = ret;
+        return ret->gethandle();
     }
 
-    void ResourceManager::create(const char *path, void *src) {
+    OUtils::Handle<Resource> ResourceManager::create(const char *path, void *src) {
         ASSERT(path != NULL, "Invalid path given to resource manager virtual create.\n");
         ASSERT(src != NULL, "Invalid source pointer given to resource manager virtual create.\n");
-        this->resources[OUtils::fnv1a(path, strlen(path), FNV1A_SEED)] = new Resource(path, src);
+        Resource *ret = new Resource(path, src);
+        this->resources[OUtils::fnv1a(path, strlen(path), FNV1A_SEED)] = ret;
+        return ret->gethandle();
     }
 
     OUtils::Handle<Resource> ResourceManager::get(const char *path) {

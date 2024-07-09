@@ -79,7 +79,7 @@ namespace OResource {
 
             // Request a file to be loaded and sleep the calling job until the file has been loaded (Blocking, but will wake the caller when done).
             static void loadwait(OUtils::Handle<Resource> resource, void **buffer, size_t offset, size_t size, uint8_t *error = NULL) {
-                ZoneScopedN("AsynIO File Load Wait");
+                ZoneScopedN("AsyncIO File Load Wait");
                 ASSERT(buffer != NULL, "No buffer for output data provided.\n");
                 ASSERT(size > 0, "Buffer cannot have the size 0.\n");
 

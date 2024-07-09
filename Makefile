@@ -66,11 +66,15 @@ shaders: $(OSHADERS)
 run: $(OSHADERS) $(BIN_DIR)/$(OUT)
 	@bash run.sh
 
-utils: utils/rpak
+utils: utils/rpak utils/otex
 
 utils/rpak: utils/rpak.c
 	@echo "Compiling utils/rpak"
 	@$(CC) -o utils/rpak utils/rpak.c -lz
+
+utils/otex: utils/otex.c
+	@echo "Compiling utils/otex"
+	@$(CC) -o utils/otex utils/otex.c -lktx -lktx_read -Lrt -Ilibs/KTX-Software/include
 
 %.spv: %.glsl
 	@printf "Compiling GLSL shader %s to Vulkan SPIRV\n" $^
@@ -96,3 +100,5 @@ clean:
 	rm -r bin
 	# rm -r build
 	rm -r $(OBJECTS)
+	rm utils/rpak
+	rm utils/otex
