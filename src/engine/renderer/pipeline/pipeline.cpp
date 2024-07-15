@@ -309,17 +309,11 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
         struct ORenderer::Texture::updateinfo info = { };
         info.timestamp = utils_getcounter();
         info.resolution = res;
-        tex->as<ORenderer::Texture>()->meetresolution(info);
+        // tex->as<ORenderer::Texture>()->meetresolution(info);
         // if (frame > 6) {
             // exit(1);
         // }
         res++;
-    } else if (res >= tex->as<ORenderer::Texture>()->headers.header.levelcount) {
-        printf("downgrade.\n");
-        struct ORenderer::Texture::updateinfo info = { };
-        info.timestamp = utils_getcounter();
-        info.resolution = 6;
-        tex->as<ORenderer::Texture>()->meetresolution(info);
     }
     frame++;
 
@@ -380,7 +374,6 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
     ORenderer::ScratchBuffer *scratchbuffer;
     ASSERT(ORenderer::context->requestscratchbuffer(&scratchbuffer) == ORenderer::RESULT_SUCCESS, "Failed to request scratchbuffer.\n");
     if (res != NULL) {
-        printf("rendering culled objects.\n");
         ZoneScopedN("Object Render");
 
         while (res != NULL) {

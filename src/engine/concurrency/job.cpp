@@ -85,6 +85,7 @@ namespace OJob {
         COMPILER_BARRIER();
         ASSERT(OJob::currentfibre != NULL, "Yield called outside of job system or with invalid fibre.\n");
         ASSERT(OJob::currentworker != NULL, "Yield called outside of job system or with invalid worker.\n");
+        ASSERT(OJob::currentworker->ctx.uc_mcontext.fpregs->rip != 0, "Invalid RIP.\n");
         swapcontext(&OJob::currentfibre->ctx, &OJob::currentworker->ctx); // Swap to worker context.
         // coroutine_yield(fibre->co);
     }
@@ -292,6 +293,9 @@ namespace OJob {
             // ASSERT(fibre->co != NULL, "Invalid coroutine for fibre.\n");
             // printf("[%ld] resuming co-routine for %lu.\n", utils_getcounter(), decl->id);
             // coroutine_resume(fibre->co);
+
+            // XXX: non-x86 hostile.
+            ASSERT(fibre->ctx.uc_mcontext.fpregs->rip != 0, "Invalid RIP.\n");
             swapcontext(&worker->ctx, &fibre->ctx);
             TracyFiberLeave;
 
@@ -404,6 +408,7 @@ namespace OJob {
 #ifdef __linux__
         numworkers = sysconf(_SC_NPROCESSORS_ONLN);
 #endif
+        numworkers = 1;
 
         printf("Job system initialised with %lu worker thread(s)\n", numworkers);
 

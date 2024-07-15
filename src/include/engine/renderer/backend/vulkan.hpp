@@ -263,11 +263,24 @@ namespace OVulkan {
         public:
             VulkanStream *next; // For pooling.
 
+            // For submission dependencies.
+            VulkanStream *waiton = NULL;
+            VulkanStream *signal = NULL;
+
             VkCommandBuffer cmd = VK_NULL_HANDLE;
+            VkFence fence = VK_NULL_HANDLE;
+            VkSemaphore semaphore = VK_NULL_HANDLE;
             VulkanContext *context;
-            uint8_t primary = 0;
+            uint8_t type = 0;
+
+            bool extra = false;
 
             void flushcmd(void);
+
+            void setdependency(ORenderer::Stream *wait, ORenderer::Stream *signal) {
+                this->waiton = (VulkanStream *)wait;
+                this->signal = (VulkanStream *)signal;
+            }
 
             void setviewport(struct ORenderer::viewport viewport);
             void setscissor(struct ORenderer::rect scissor);
@@ -302,7 +315,7 @@ namespace OVulkan {
             void bindset(struct ORenderer::resourceset set);
 
             // Transition a texture between layouts.
-            void barrier(struct ORenderer::texture texture, size_t format, size_t oldlayout, size_t newlayout, size_t srcstage, size_t dststage, size_t srcaccess, size_t dstaccess, size_t basemip = 0, size_t mipcount = SIZE_MAX, size_t baselayer = 0, size_t layercount = SIZE_MAX);
+            void barrier(struct ORenderer::texture texture, size_t format, size_t oldlayout, size_t newlayout, size_t srcstage, size_t dststage, size_t srcaccess, size_t dstaccess, uint8_t srcqueue, uint8_t dstqueue, size_t basemip = 0, size_t mipcount = SIZE_MAX, size_t baselayer = 0, size_t layercount = SIZE_MAX);
 
             void copybufferimage(struct ORenderer::bufferimagecopy region, struct ORenderer::buffer buffer, struct ORenderer::texture texture, size_t layout);
             void copyimage(struct ORenderer::imagecopy region, struct ORenderer::texture src, struct ORenderer::texture dst, size_t srclayout, size_t dstlayout);
@@ -338,13 +351,25 @@ namespace OVulkan {
             OJob::Spinlock spin;
             VulkanContext *context;
         public:
-            VulkanStream pool[VULKAN_POOLSIZE];
-            VkCommandBuffer cmds[VULKAN_POOLSIZE];
-            VulkanStream *freestream;
+            VulkanStream computepool[VULKAN_POOLSIZE];
+            VulkanStream transferpool[VULKAN_POOLSIZE];
+            VulkanStream impool[VULKAN_POOLSIZE];
+
+            VkFence fences[VULKAN_POOLSIZE * 3];
+            VkSemaphore semaphores[VULKAN_POOLSIZE * 3];
+
+            VkCommandBuffer computecmds[VULKAN_POOLSIZE];
+            VkCommandBuffer transfercmds[VULKAN_POOLSIZE];
+            VkCommandBuffer imcmds[VULKAN_POOLSIZE];
+
+            VulkanStream *freecompute;
+            VulkanStream *freetransfer;
+            VulkanStream *freeim;
 
             void init(VulkanContext *ctx);
+            void destroy(void);
 
-            VulkanStream *alloc(void);
+            VulkanStream *alloc(uint8_t type);
             void free(VulkanStream *stream);
     };
 
@@ -386,7 +411,6 @@ namespace OVulkan {
             uint32_t presentfamily;
             VkQueue graphicsqueue;
             VkQueue computequeue;
-            VkQueue transferqueue;
             VkQueue presentqueue;
             // Are these queues actually asynchronous?
             bool asyncqueues;
@@ -417,6 +441,8 @@ namespace OVulkan {
             // yes, that makes sense (and the vulkan render passes just gets the view resources shoved at them)
 
             VkCommandPool cmdpool;
+            VkCommandPool computepool;
+            VkCommandPool transferpool;
             VkCommandBuffer cmd[RENDERER_MAXLATENCY + 1]; // With additional space for tracy cmd buffer
             VulkanStream stream[RENDERER_MAXLATENCY];
 
@@ -462,13 +488,12 @@ namespace OVulkan {
                 return ORenderer::RESULT_SUCCESS;
             }
             ORenderer::Stream *getimmediate(void);
-            ORenderer::Stream *getsecondary(void) {
-                return this->streampool.alloc();
-            }
+            ORenderer::Stream *requeststream(uint8_t type);
+            void freestream(ORenderer::Stream *stream);
             uint64_t getbufferref(struct ORenderer::buffer buffer, uint8_t latency);
             uint8_t transitionlayout(struct ORenderer::texture texture, size_t format, size_t state);
 
-            uint8_t submitstream(ORenderer::Stream *stream);
+            uint8_t submitstream(ORenderer::Stream *stream, bool wait);
 
             void destroytexture(struct ORenderer::texture *texture);
             void destroytextureview(struct ORenderer::textureview *textureview);

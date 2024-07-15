@@ -211,6 +211,7 @@ namespace OScene {
     }
 
     static void cullworker(OJob::Job *job) {
+        printf("cull worker.\n");
         struct ParitionManager::work *work = (struct ParitionManager::work *)job->param;
         ParitionManager *manager = work->manager;
         CullResultList *list = work->list;
@@ -269,7 +270,7 @@ namespace OScene {
 
         struct work work = { .idx = &workeridx, .list = &list, .frustum = &frustum, .manager = this };
         OJob::Counter counter = OJob::Counter();
-        for (size_t i = 0; i < this->cells.size() % OJob::numworkers; i++) { // Distribute work across the number of workers (not an exact science, only a best case average so that we have a possibility of all the work happening properly distributed).
+        for (size_t i = 0; i < this->cells.size() / OJob::numworkers; i++) { // Distribute work across the number of workers (not an exact science, only a best case average so that we have a possibility of all the work happening properly distributed).
             OJob::Job *job = new OJob::Job(cullworker, (uintptr_t)&work);
             job->counter = &counter;
             OJob::kickjob(job);

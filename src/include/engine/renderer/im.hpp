@@ -440,7 +440,7 @@ namespace ORenderer {
                 memcpy(stagingmap.mapped[0], pixels, size);
                 ORenderer::context->unmapbuffer(stagingmap);
 
-                ORenderer::Stream *stream = ORenderer::context->getimmediate();
+                ORenderer::Stream *stream = ORenderer::context->requeststream(ORenderer::STREAM_IMMEDIATE);
                 struct ORenderer::bufferimagecopy region = { };
                 region.offset = 0;
                 region.rowlen = 0;
@@ -484,6 +484,7 @@ namespace ORenderer {
                 );
                 stream->end();
                 stream->release();
+                context->submitstream(stream, true);
 
                 ORenderer::context->destroybuffer(&staging);
 

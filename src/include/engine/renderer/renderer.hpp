@@ -478,7 +478,8 @@ namespace ORenderer {
         PIPELINE_STAGEEARLYFRAG = (1 << 9),
         PIPELINE_STAGELATEFRAG = (1 << 10),
         PIPELINE_STAGETOP = (1 << 11),
-        PIPELINE_STAGEBOTTOM = (1 << 12)
+        PIPELINE_STAGEBOTTOM = (1 << 12),
+        PIPELINE_STAGEALL = (1 << 13) // Special "ALL", includes outside stages.
     };
 
     enum {
@@ -845,7 +846,7 @@ namespace ORenderer {
     };
 
     enum {
-        RESOURCEFLAG_BINDLESS
+        RESOURCEFLAG_BINDLESS = (1 << 0)
     };
 
     struct resourcedesc {
@@ -870,11 +871,26 @@ namespace ORenderer {
         size_t flag = 0;
     };
 
+    enum {
+        STREAM_FRAME, // Typical stream for this frame.
+        STREAM_IMMEDIATE, // Stream for immediate submission usage.
+        STREAM_COMPUTE, // Stream for compute usage.
+        STREAM_TRANSFER // Stream for transfer usage.
+    };
+
     class Stream;
     class ScratchBuffer;
 
+    struct streamdependency {
+        // XXX: Might be worth extending these out to raw semaphores, represented in much the same way as other render resources, that way it can give the user more fine tuned control over how this all works.
+        Stream *waiton; // Wait on this stream's semaphore.
+        Stream *signal; // Signal this stream's semaphore.
+    };
+
     class RendererContext {
         public:
+
+            std::atomic<size_t> frameid;
 
             RendererContext(struct init *init) { };
             virtual ~RendererContext(void) { };
@@ -1057,7 +1073,8 @@ namespace ORenderer {
             virtual uint8_t transitionlayout(struct texture texture, size_t format, size_t state) { return RESULT_SUCCESS; }
 
             virtual ORenderer::Stream *getimmediate(void) { return NULL; }
-            virtual ORenderer::Stream *getsecondary(void) { return NULL; }
+            virtual ORenderer::Stream *requeststream(uint8_t type) { return NULL; }
+            virtual void freestream(ORenderer::Stream *stream) { }
             // Get reference to a buffer, be it a handle or a direct address (Vulkan).
             virtual uint64_t getbufferref(struct ORenderer::buffer buffer, uint8_t latency = UINT8_MAX) { return 0; }
 
@@ -1067,7 +1084,7 @@ namespace ORenderer {
             // submitting a stream will have it executed on GPU ASAP.
             // not to be used in the pipeline for the primary stream.
             // Submit a renderer stream to be executed on the GPU ASAP.
-            virtual uint8_t submitstream(Stream *stream) { return RESULT_SUCCESS; }
+            virtual uint8_t submitstream(Stream *stream, bool wait = false) { return RESULT_SUCCESS; }
             // XXX: Have a way to submit another stream's commands to our current stream
 
             // Destroy a texture.
@@ -1345,6 +1362,9 @@ namespace ORenderer {
                 // this->mappings.clear();
             }
 
+            // Depend on another stream's completion, while triggering another.
+            virtual void setdependency(Stream *wait, Stream *signal) { }
+
             virtual void setviewport(struct viewport viewport) { }
 
             virtual void pushconstants(struct pipelinestate state, void *data, size_t size) { }
@@ -1492,7 +1512,7 @@ namespace ORenderer {
             }
 
             // Transition a texture between layouts.
-            virtual void barrier(struct texture texture, size_t format, size_t oldlayout, size_t newlayout, size_t srcstage, size_t dststage, size_t srcaccess, size_t dstaccess, size_t basemip = 0, size_t mipcount = SIZE_MAX, size_t baselayer = 0, size_t layercount = SIZE_MAX) {
+            virtual void barrier(struct texture texture, size_t format, size_t oldlayout, size_t newlayout, size_t srcstage, size_t dststage, size_t srcaccess, size_t dstaccess, uint8_t srcqueue = UINT8_MAX, uint8_t dstqueue = UINT8_MAX, size_t basemip = 0, size_t mipcount = SIZE_MAX, size_t baselayer = 0, size_t layercount = SIZE_MAX) {
                 // ZoneScoped;
                 // this->mutex.lock();
                 // this->cmd.push_back((struct streamnibble) { .type = OP_TRANSITIONLAYOUT, .layout = {

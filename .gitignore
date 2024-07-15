@@ -8,6 +8,7 @@ pk2/
 temp/
 textures/
 utils/rpak
+utils/otex
 misc/
 *.osce
 *.omod

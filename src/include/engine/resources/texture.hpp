@@ -234,7 +234,7 @@ namespace OResource {
                 memcpy(stagingmap.mapped[0], data, size);
                 ORenderer::context->unmapbuffer(stagingmap);
 
-                ORenderer::Stream *stream = ORenderer::context->getimmediate();
+                ORenderer::Stream *stream = ORenderer::context->requeststream(ORenderer::STREAM_IMMEDIATE);
 
                 struct ORenderer::texture texture;
                 ORenderer::context->createtexture(desc, &texture);
@@ -291,6 +291,7 @@ namespace OResource {
 
                 stream->end();
                 stream->release();
+                ORenderer::context->submitstream(stream, true);
 
                 ORenderer::context->destroybuffer(&staging);
                 return texture;

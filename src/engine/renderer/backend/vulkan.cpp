@@ -50,8 +50,7 @@ namespace OVulkan {
         { VK_KHR_XLIB_SURFACE_EXTENSION_NAME, false, true, false },
 #endif
 #ifdef OMICRON_DEBUG
-        { VK_EXT_DEBUG_UTILS_EXTENSION_NAME, false, true, false },
-        // { VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME, false, true, false }
+        { VK_EXT_DEBUG_UTILS_EXTENSION_NAME, false, true, false }
 #endif
     };
 
@@ -467,6 +466,7 @@ namespace OVulkan {
 
     VkPipelineStageFlags pipelinestageflags(size_t srcstage) {
         return 0 |
+            (srcstage & ORenderer::PIPELINE_STAGEALL ? VK_PIPELINE_STAGE_ALL_COMMANDS_BIT : 0) |
             (srcstage & ORenderer::PIPELINE_STAGEVERTEXSHADER ? VK_PIPELINE_STAGE_VERTEX_SHADER_BIT : 0) |
             (srcstage & ORenderer::PIPELINE_STAGEVERTEXINPUT ? VK_PIPELINE_STAGE_VERTEX_INPUT_BIT : 0) |
             (srcstage & ORenderer::PIPELINE_STAGETESSCONTROL ? VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT : 0) |
@@ -499,14 +499,23 @@ namespace OVulkan {
             (srcflags & ORenderer::ACCESS_INPUTREAD ? VK_ACCESS_INPUT_ATTACHMENT_READ_BIT : 0);
     }
 
-    static void barrier(VkCommandBuffer cmd, struct texture *texture, size_t format, size_t oldlayout, size_t newlayout, size_t srcstage, size_t dststage, size_t srcaccess, size_t dstaccess, size_t basemip, size_t mipcount, size_t baselayer, size_t layercount) {
+    static uint32_t convertqueue(ORenderer::RendererContext *ctx, uint8_t type) {
+        const VulkanContext *vkctx = (VulkanContext *)ctx;
+        return
+            type == UINT8_MAX ? VK_QUEUE_FAMILY_IGNORED :
+            type == ORenderer::STREAM_TRANSFER ? vkctx->transferfamily :
+            type == ORenderer::STREAM_COMPUTE ? vkctx->computefamily :
+            vkctx->initialfamily;
+    }
+
+    static void barrier(VkCommandBuffer cmd, struct texture *texture, size_t format, size_t oldlayout, size_t newlayout, size_t srcstage, size_t dststage, size_t srcaccess, size_t dstaccess, uint8_t srcqueue, uint8_t dstqueue, size_t basemip, size_t mipcount, size_t baselayer, size_t layercount) {
         VkImageMemoryBarrier barrier = { };
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         barrier.pNext = NULL;
         barrier.oldLayout = layouttable[oldlayout];
         barrier.newLayout = layouttable[newlayout];
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.srcQueueFamilyIndex = convertqueue(ORenderer::context, srcqueue);
+        barrier.dstQueueFamilyIndex = convertqueue(ORenderer::context, dstqueue);
         barrier.image = texture->image;
         barrier.subresourceRange.baseMipLevel = basemip;
         barrier.subresourceRange.levelCount = mipcount != SIZE_MAX ? mipcount : VK_REMAINING_MIP_LEVELS;
@@ -1321,6 +1330,7 @@ namespace OVulkan {
         VkDescriptorSetLayoutBinding *layoutbindings = (VkDescriptorSetLayoutBinding *)malloc(sizeof(VkDescriptorSetLayoutBinding) * desc->resourcecount);
         VkDescriptorBindingFlags *flagbindings = (VkDescriptorBindingFlags *)malloc(sizeof(VkDescriptorBindingFlags) * desc->resourcecount);
         ASSERT(layoutbindings != NULL, "Failed to allocate memory for Vulkan descriptor set layout bindings.\n");
+        ASSERT(flagbindings != NULL, "Failed to allocate memory for Vulkan descriptor set flag bindings.\n");
         for (size_t i = 0; i < desc->resourcecount; i++) {
             struct ORenderer::resourcedesc *resource = &desc->resources[i];
             layoutbindings[i].binding = resource->binding;
@@ -1966,39 +1976,74 @@ namespace OVulkan {
         stream->release();
     }
 
-    uint8_t VulkanContext::submitstream(ORenderer::Stream *stream) {
+    uint8_t VulkanContext::submitstream(ORenderer::Stream *stream, bool wait) {
         ASSERT(stream != NULL, "Stream must not be NULL.\n");
-        VkCommandBuffer cmd = this->beginimmediate();
+        stream->claim();
 
-        // this->interpretstream(cmd, stream);
+        VulkanStream *vkstream = (VulkanStream *)stream;
 
-        this->endimmediate();
+        VkSubmitInfo submit = { };
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.pNext = NULL;
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &vkstream->cmd;
+
+        if (vkstream->waiton != NULL) {
+            // Wait on this one.
+            submit.waitSemaphoreCount = 1;
+            submit.pWaitSemaphores = &vkstream->waiton->semaphore;
+            // This'll mean we wait for the semaphore to trigger before even beginning to do any work.
+            VkPipelineStageFlags stagemask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT; // XXX: Better specifics.
+            submit.pWaitDstStageMask = &stagemask;
+        }
+
+        submit.signalSemaphoreCount = 1;
+        submit.pSignalSemaphores = &vkstream->semaphore; // Trigger our own semaphore.
+
+        VkResult res = vkQueueSubmit(
+            vkstream->type == ORenderer::STREAM_COMPUTE ? this->asynccompute :
+            vkstream->type == ORenderer::STREAM_TRANSFER ? this->asynctransfer :
+            this->graphicsqueue,
+            1, &submit, wait ? vkstream->fence : VK_NULL_HANDLE);
+        ASSERT(res == VK_SUCCESS, "Failed to submit Vulkan queue %d.\n", res);
+
+        if (wait) {
+            vkWaitForFences(this->dev, 1, &vkstream->fence, VK_TRUE, UINT64_MAX);
+            vkResetFences(this->dev, 1, &vkstream->fence);
+        }
+
+        stream->release();
         return ORenderer::RESULT_SUCCESS;
     }
     ORenderer::Stream *VulkanContext::getimmediate(void) {
         return &this->imstream;
     }
 
-    void VulkanStream::begin(void) {
-        if (primary == 1) { // Primary
-            VkCommandBufferBeginInfo info = { };
-            info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-            info.pNext = NULL;
-            info.flags = 0;
-            info.pInheritanceInfo = NULL;
-            VkResult res = vkBeginCommandBuffer(this->cmd, &info);
-            ASSERT(res == VK_SUCCESS, "Failed to begin Vulkan command buffer %d.\n", res);
-        } else if (primary == 0) { // Sescondary
-            VkCommandBufferBeginInfo info = { };
-            info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-            info.pNext = NULL;
-            info.pInheritanceInfo = NULL;
-            info.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-            VkResult res = vkBeginCommandBuffer(this->cmd, &info);
-            ASSERT(res == VK_SUCCESS, "Failed to begin Vulkan command buffer %d.\n", res);
-        } else { // Immediate
-            this->context->beginimmediate();
+    ORenderer::Stream *VulkanContext::requeststream(uint8_t type) {
+        if (type == ORenderer::STREAM_TRANSFER || type == ORenderer::STREAM_COMPUTE || type == ORenderer::STREAM_IMMEDIATE) {
+            return this->streampool.alloc(type);
+        } else if (type == ORenderer::STREAM_FRAME) {
+            return &this->stream[this->frame];
+        } else {
+            ASSERT(false, "Invalid stream type %u requested.\n", type);
         }
+    }
+
+    void VulkanContext::freestream(ORenderer::Stream *stream) {
+        VulkanStream *vkstream = (VulkanStream *)stream;
+        if (vkstream->type == ORenderer::STREAM_TRANSFER || vkstream->type == ORenderer::STREAM_COMPUTE) {
+            this->streampool.free(vkstream);
+        }
+    }
+
+    void VulkanStream::begin(void) {
+        VkCommandBufferBeginInfo info = { };
+        info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        info.pNext = NULL;
+        info.flags = 0;
+        info.pInheritanceInfo = NULL;
+        VkResult res = vkBeginCommandBuffer(this->cmd, &info);
+        ASSERT(res == VK_SUCCESS, "Failed to begin Vulkan command buffer %d.\n", res);
     }
 
     uint64_t VulkanStream::zonebegin(const char *name) {
@@ -2177,10 +2222,10 @@ namespace OVulkan {
         this->mappings.push_back((struct ORenderer::pipelinestateresourcemap) { .binding = binding, .type = type, .sampledbind = bind });
     }
 
-    void VulkanStream::barrier(struct ORenderer::texture texture, size_t format, size_t oldlayout, size_t newlayout, size_t srcstage, size_t dststage, size_t srcaccess, size_t dstaccess, size_t basemip, size_t mipcount, size_t baselayer, size_t layercount) {
+    void VulkanStream::barrier(struct ORenderer::texture texture, size_t format, size_t oldlayout, size_t newlayout, size_t srcstage, size_t dststage, size_t srcaccess, size_t dstaccess, uint8_t srcqueue, uint8_t dstqueue, size_t basemip, size_t mipcount, size_t baselayer, size_t layercount) {
         ZoneScoped;
         struct texture *vktexture = &this->context->textures[texture.handle].vkresource;
-        OVulkan::barrier(this->cmd, vktexture, format, oldlayout, newlayout, srcstage, dststage, srcaccess, dstaccess, basemip, mipcount, baselayer, layercount);
+        OVulkan::barrier(this->cmd, vktexture, format, oldlayout, newlayout, srcstage, dststage, srcaccess, dstaccess, srcqueue, dstqueue, basemip, mipcount, baselayer, layercount);
     }
 
     void VulkanStream::copybufferimage(struct ORenderer::bufferimagecopy region, struct ORenderer::buffer buffer, struct ORenderer::texture texture, size_t layout) {
@@ -2298,15 +2343,10 @@ namespace OVulkan {
         vkCmdEndRenderPass(this->cmd);
     }
 
-    void VulkanStream::end(void) {
-
-        if (this->primary != 2) {
-            TracyVkCollect(this->context->tracyctx, cmd);
-            VkResult res = vkEndCommandBuffer(this->cmd);
-            ASSERT(res == VK_SUCCESS, "Failed to end Vulkan command buffer %d.\n", res);
-        } else {
-            this->context->endimmediate();
-        }
+    void VulkanStream::end() {
+        TracyVkCollect(this->context->tracyctx, cmd);
+        VkResult res = vkEndCommandBuffer(this->cmd);
+        ASSERT(res == VK_SUCCESS, "Failed to end Vulkan command buffer %d.\n", res);
     }
 
     void VulkanContext::recordcmd(VkCommandBuffer cmd, uint32_t image, VulkanStream *stream) {
@@ -2533,6 +2573,9 @@ namespace OVulkan {
         }
 
         vkDestroyDescriptorPool(this->dev, this->descpool, NULL);
+        this->streampool.destroy();
+        vkDestroyCommandPool(this->dev, this->transferpool, NULL);
+        vkDestroyCommandPool(this->dev, this->computepool, NULL);
         vkDestroyCommandPool(this->dev, this->cmdpool, NULL);
         for (size_t i = 0; i < RENDERER_MAXLATENCY; i++) {
             vkDestroySemaphore(this->dev, this->imagepresent[i], NULL);
@@ -2909,11 +2952,14 @@ namespace OVulkan {
 
         VkDeviceCreateInfo devicecreate = { };
         devicecreate.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        printf("sizeof %lu.\n", sizeof(VkPhysicalDeviceFeatures));
         devicecreate.pNext = &bda; // Pass on extra enabled features.
         devicecreate.pQueueCreateInfos = queuecreate.data();
         devicecreate.queueCreateInfoCount = queuecreate.size();
         devicecreate.pEnabledFeatures = &this->phyfeatures;
         devicecreate.enabledExtensionCount = sizeof(devextensions) / sizeof(devextensions[0]);
+        printf("extensions: %u.\n", devicecreate.enabledExtensionCount);
+
 
         const char *devextensions[sizeof(OVulkan::devextensions) / sizeof(OVulkan::devextensions[0])]; // purely string representation of vulkan device extensions
         for (size_t i = 0; i < sizeof(OVulkan::devextensions) / sizeof(OVulkan::devextensions[0]); i++) {
@@ -2978,13 +3024,17 @@ namespace OVulkan {
         }
 
         if (separatecomputeasync) { // Separate queues.
+            this->asyncqueues = true;
             vkGetDeviceQueue(this->dev, computefamily, 0, &this->asynccompute);
             vkGetDeviceQueue(this->dev, transferfamily, 1, &this->asynctransfer);
         } else if (uniquecompute) { // One for compute.
             vkGetDeviceQueue(this->dev, computefamily, 0, &this->asynccompute);
+            this->asyncqueues = true;
         } else if (uniquetransfer) { // One for transfer.
+            this->asyncqueues = true;
             vkGetDeviceQueue(this->dev, transferfamily, 0, &this->asynctransfer);
         } else if (asyncqueues) {
+            this->asyncqueues = true;
             // Only one queue shared for all async ops.
             vkGetDeviceQueue(this->dev, computefamily, 0, &this->asynccompute);
             vkGetDeviceQueue(this->dev, transferfamily, 0, &this->asynctransfer);
@@ -3015,6 +3065,14 @@ namespace OVulkan {
         res = vkCreateCommandPool(this->dev, &poolcreate, NULL, &this->cmdpool);
         ASSERT(res == VK_SUCCESS, "Failed to create Vulkan command pool %d.\n", res);
 
+        // Create pools for async transfer.
+        poolcreate.queueFamilyIndex = this->computefamily;
+        res = vkCreateCommandPool(this->dev, &poolcreate, NULL, &this->computepool);
+        ASSERT(res == VK_SUCCESS, "Failed to create Vulkan command pool %d.\n", res);
+        poolcreate.queueFamilyIndex = this->transferfamily;
+        res = vkCreateCommandPool(this->dev, &poolcreate, NULL, &this->transferpool);
+        ASSERT(res == VK_SUCCESS, "Failed to create Vulkan command pool %d.\n", res);
+
         // create all command buffers
         VkCommandBufferAllocateInfo cmdalloc = { };
         cmdalloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -3026,7 +3084,7 @@ namespace OVulkan {
 
         for (size_t i = 0; i < RENDERER_MAXLATENCY; i++) {
             this->stream[i].cmd = this->cmd[i]; // Give the streams a handle to our command buffer. We can now reference it both through the stream and through this->cmd.
-            this->stream[i].primary = 1;
+            this->stream[i].type = ORenderer::STREAM_FRAME;
             this->stream[i].context = this;
         }
 
@@ -3039,7 +3097,8 @@ namespace OVulkan {
         ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan immediate submission command buffer %d.\n", res);
 
         this->imstream.context = this;
-        this->imstream.primary = 2;
+        this->imstream.extra = true;
+        this->imstream.type = ORenderer::STREAM_IMMEDIATE;
         this->imstream.cmd = this->imcmd;
 
         // Initialise the stream pool.
@@ -3086,6 +3145,7 @@ namespace OVulkan {
         descpoolcreate.poolSizeCount = sizeof(poolsizes) / sizeof(poolsizes[0]);
         descpoolcreate.pPoolSizes = poolsizes; // describe which pools are part of our pool
         descpoolcreate.maxSets = VULKAN_MAXDESCRIPTORS;
+        descpoolcreate.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
         res = vkCreateDescriptorPool(this->dev, &descpoolcreate, NULL, &this->descpool);
         ASSERT(res == VK_SUCCESS, "Failed to create Vulkan descriptor pool %d.\n", res);
 
@@ -3104,24 +3164,86 @@ namespace OVulkan {
     }
 
     void VulkanStreamPool::init(VulkanContext *ctx) {
-        this->freestream = &this->pool[0];
+        this->context = ctx;
+        this->freecompute = &this->computepool[0];
+        this->freetransfer = &this->transferpool[0];
+        this->freeim = &this->impool[0];
+
         VkCommandBufferAllocateInfo info = { };
         info.pNext = NULL;
         info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        info.commandPool = ctx->cmdpool;
-        info.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+        info.commandPool = ctx->computepool;
+        info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         info.commandBufferCount = VULKAN_POOLSIZE;
-        VkResult res = vkAllocateCommandBuffers(ctx->dev, &info, this->cmds);
+        VkResult res = vkAllocateCommandBuffers(ctx->dev, &info, this->computecmds);
+        ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan stream command buffer pool.\n");
+        info.commandPool = ctx->transferpool;
+        res = vkAllocateCommandBuffers(ctx->dev, &info, this->transfercmds);
+        ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan stream command buffer pool.\n");
+        info.commandPool = ctx->cmdpool;
+        res = vkAllocateCommandBuffers(ctx->dev, &info, this->imcmds);
         ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan stream command buffer pool.\n");
 
-        for (size_t i = 0; i < VULKAN_POOLSIZE - 1; i++) {
-            this->pool[i].cmd = this->cmds[i];
-            this->pool[i].context = ctx;
-            this->pool[i].primary = 0;
-            this->pool[i].next = &this->pool[i + 1];
+        VkFenceCreateInfo fenceinfo = { };
+        fenceinfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceinfo.pNext = NULL;
+        fenceinfo.flags = 0;
+
+        VkSemaphoreCreateInfo seminfo = { };
+        seminfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        seminfo.pNext = NULL;
+        seminfo.flags = 0;
+
+        for (size_t i = 0; i < VULKAN_POOLSIZE * 3; i++) {
+            ASSERT(vkCreateFence(ctx->dev, &fenceinfo, NULL, &this->fences[i]) == VK_SUCCESS, "Failed to create Vulkan fence!\n");
+            VkDebugUtilsObjectNameInfoEXT nameinfo = { };
+            nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+            nameinfo.pNext = NULL;
+            nameinfo.objectHandle = (uint64_t)this->fences[i];
+            nameinfo.objectType = VK_OBJECT_TYPE_FENCE;
+            char name[64];
+            snprintf(name, 64, "Pool Fence %lu\n", i);
+            nameinfo.pObjectName = name;
+            vkSetDebugUtilsObjectNameEXT(this->context->dev, &nameinfo);
+            ASSERT(vkCreateSemaphore(ctx->dev, &seminfo, NULL, &this->semaphores[i]) == VK_SUCCESS, "Failed to create Vulkan semaphore!\n");
         }
 
-        this->pool[VULKAN_POOLSIZE - 1].next = NULL;
+        for (size_t i = 0; i < VULKAN_POOLSIZE - 1; i++) {
+            this->transferpool[i].cmd = this->transfercmds[i];
+            this->transferpool[i].context = ctx;
+            this->transferpool[i].type = ORenderer::STREAM_TRANSFER;
+            this->transferpool[i].next = &this->transferpool[i + 1];
+            this->transferpool[i].fence = this->fences[i];
+            this->transferpool[i].semaphore = this->semaphores[i];
+
+            this->computepool[i].cmd = this->computecmds[i];
+            this->computepool[i].context = ctx;
+            this->computepool[i].type = ORenderer::STREAM_COMPUTE;
+            this->computepool[i].next = &this->computepool[i + 1];
+            this->computepool[i].fence = this->fences[i + VULKAN_POOLSIZE];
+            this->computepool[i].semaphore = this->semaphores[i + VULKAN_POOLSIZE];
+
+            this->impool[i].cmd = this->imcmds[i];
+            this->impool[i].context = ctx;
+            this->impool[i].type = ORenderer::STREAM_IMMEDIATE;
+            this->impool[i].next = &this->impool[i + 1];
+            this->impool[i].fence = this->fences[i + (VULKAN_POOLSIZE * 2)];
+            this->impool[i].semaphore = this->semaphores[i + (VULKAN_POOLSIZE * 2)];
+        }
+
+        this->transferpool[VULKAN_POOLSIZE - 1].next = NULL;
+        this->computepool[VULKAN_POOLSIZE - 1].next = NULL;
+        this->impool[VULKAN_POOLSIZE - 1].next = NULL;
+    }
+
+    void VulkanStreamPool::destroy(void) {
+        vkFreeCommandBuffers(this->context->dev, this->context->computepool, VULKAN_POOLSIZE, this->computecmds);
+        vkFreeCommandBuffers(this->context->dev, this->context->transferpool, VULKAN_POOLSIZE, this->transfercmds);
+        vkFreeCommandBuffers(this->context->dev, this->context->cmdpool, VULKAN_POOLSIZE, this->imcmds);
+        for (size_t i = 0; i < VULKAN_POOLSIZE * 3; i++) {
+            vkDestroyFence(this->context->dev, this->fences[i], NULL);
+            vkDestroySemaphore(this->context->dev, this->semaphores[i], NULL);
+        }
     }
 
     uint64_t VulkanContext::getbufferref(struct ORenderer::buffer buffer, uint8_t latency) {
@@ -3136,13 +3258,21 @@ namespace OVulkan {
         return addr;
     }
 
-    VulkanStream *VulkanStreamPool::alloc(void) {
-        ASSERT(this->freestream != NULL, "Empty Vulkan stream pool.\n");
+    VulkanStream *VulkanStreamPool::alloc(uint8_t type) {
+        ASSERT(
+            type == ORenderer::STREAM_TRANSFER ||
+            type == ORenderer::STREAM_COMPUTE ||
+            type == ORenderer::STREAM_IMMEDIATE,
+            "Invalid stream type for pool allocation %u.\n", type);
+        VulkanStream **freestream = // Figure out what stream is being requested, this way prevents code duplication.
+            type == ORenderer::STREAM_TRANSFER ? &this->freetransfer :
+            type == ORenderer::STREAM_COMPUTE ? &this->freecompute : &this->freeim;
+        ASSERT(*freestream != NULL, "Empty Vulkan stream pool.\n");
 
         this->spin.lock();
 
-        VulkanStream *stream = this->freestream;
-        this->freestream = stream->next;
+        VulkanStream *stream = *freestream;
+        *freestream = stream->next;
 
         this->spin.unlock();
 
@@ -3152,9 +3282,13 @@ namespace OVulkan {
     void VulkanStreamPool::free(VulkanStream *stream) {
         ASSERT(stream != NULL, "Expected active stream, not NULL.\n");
 
+        VulkanStream **freestream = // Figure out what stream is being requested, this way prevents code duplication.
+            stream->type == ORenderer::STREAM_TRANSFER ? &this->freetransfer :
+            stream->type == ORenderer::STREAM_COMPUTE ? &this->freecompute : &this->freeim;
+
         this->spin.lock();
-        stream->next = this->freestream;
-        this->freestream = stream;
+        stream->next = *freestream;
+        *freestream = stream;
         this->spin.unlock();
     }
 
@@ -3237,6 +3371,7 @@ namespace OVulkan {
         }
 
         this->frame = (this->frame + 1) % RENDERER_MAXLATENCY;
+        this->frameid.fetch_add(1);
     }
 
     ORenderer::RendererContext *createcontext(void) {

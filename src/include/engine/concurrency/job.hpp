@@ -297,6 +297,7 @@ namespace OJob {
     void kickjobwait(OJob::Job *job);
     // call job_kickjobs and wait for completion using job_waitcounter (expects all jobs to utilise the same counter)
     void kickjobswait(int count, OJob::Job *jobs[]);
+    void yield(OJob::Fibre *fibre, enum OJob::Job::status status);
 
     void init(void);
     void destroy(void);

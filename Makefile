@@ -9,7 +9,7 @@ BIN_DIR = bin
 BUILD_DIR = build
 CC = gcc
 CXX = g++
-CFLAGS = -std=gnu++17 -I$(SOURCE_DIR)/include -I$(SOURCE_DIR)/ \
+CFLAGS = -fsanitize=address -std=gnu++17 -I$(SOURCE_DIR)/include -I$(SOURCE_DIR)/ \
 		 -Ilibs/glm/ \
 		 -Ilibs/KTX-Software/include \
 		 -Ilibs/glfw/include \
