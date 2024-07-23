@@ -304,6 +304,7 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
     float delta = (now - lastframetimestamp) / 1000000.0f;
     lastframetimestamp = now;
 
+    // printf("start of work.\n");
     OUtils::Handle<OResource::Resource> tex = OResource::manager.get("misc/test.otex*");
     if (res < tex->as<ORenderer::Texture>()->headers.header.levelcount && !(frame % 16)) {
         struct ORenderer::Texture::updateinfo info = { };
@@ -332,7 +333,7 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
 
     stream->claim();
     stream->begin();
-    size_t zone = stream->zonebegin("Object Render");
+    // size_t zone = stream->zonebegin("Object Render");
     stream->beginrenderpass(rpass, fb, (struct ORenderer::rect) { .x = 0, .y = 0, .width = renderrect.width, .height = renderrect.height }, colourdesc);
     struct ORenderer::viewport viewport = { .x = 0, .y = 0, .width = (float)renderrect.width, .height = (float)renderrect.height, .mindepth = 0.0f, .maxdepth = 1.0f };
 
@@ -365,14 +366,17 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
 
     ORenderer::PerspectiveCamera tcamera = ORenderer::PerspectiveCamera(glm::vec3(2.0f, 0.0f, -10.0f), glm::rotate(orientation, glm::radians(10.0f) * (float)glfwGetTime(), glm::vec3(0.0f, 1.0f, 0.0f)), 45.0f, renderrect.width / (float)renderrect.height, 0.1f, 1000.0f);
 
+
+    // printf("post render begin start work.\n");
+
     // XXX: This would be done asynchronously! Cull while we do other important work on this thread instead of waiting on this!
     OScene::CullResult *res = scene.partitionmanager.cull(*camera);
     TracyMessageL("Done Culling");
     OScene::CullResult *reshead = res;
     size_t totalobjects = scene.objects.size();
     size_t visibleobjects = 0;
-    ORenderer::ScratchBuffer *scratchbuffer;
-    ASSERT(ORenderer::context->requestscratchbuffer(&scratchbuffer) == ORenderer::RESULT_SUCCESS, "Failed to request scratchbuffer.\n");
+    ORenderer::ScratchBuffer *scratchbuffer = ORenderer::context->requestscratchbuffer();
+    // printf("done cull.\n");
     if (res != NULL) {
         ZoneScopedN("Object Render");
 
@@ -393,7 +397,7 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
                         data.sampler = samplerid;
                         // XXX: Compress into material ID system.
                         // data.base = model->model->as<ORenderer::Model>()->meshes[i].material.base.gpuid;
-                        data.base = 0;
+                        data.base = 1;
                         data.normal = model->model->as<ORenderer::Model>()->meshes[i].material.normal.gpuid;
                         data.mrid = model->model->as<ORenderer::Model>()->meshes[i].material.mr.gpuid;
                         data.model = obj->getglobalmatrix();
@@ -408,9 +412,9 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
                         stream->setvtxbuffer(model->model->as<ORenderer::Model>()->meshes[i].vertexbuffer, 0);
                         stream->setidxbuffer(model->model->as<ORenderer::Model>()->meshes[i].indexbuffer, 0, false);
                         stream->drawindexed(model->model->as<ORenderer::Model>()->meshes[i].indices.size(), 1, 0, 0, 0);
-                        }
-                        model->model->release(); // XXX: Relinquish our claim on resource access.
-                        TracyMessageL("finish single.");
+                    }
+                    model->model->release(); // XXX: Relinquish our claim on resource access.
+                    TracyMessageL("finish single.");
                 }
             }
             res = res->header.next;
@@ -419,6 +423,7 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
         // Release our result pages back to the allocator.
         scene.partitionmanager.freeresults(reshead);
     }
+    // printf("rendered.\n");
 
     // zone = stream->zonebegin("Im3D");
     // Im3d::AppData &ad = Im3d::GetAppData();
@@ -478,7 +483,6 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
     // }
 
 
-    stream->zoneend(zone);
     stream->endrenderpass();
 
     // printf("canvas.\n");
@@ -540,7 +544,7 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
     // }
 
     {
-        // printf("imgui.\n");
+        // printf("imgui.\n");;
         ZoneScopedN("ImGui Steps");
         ImGuiIO &io = ImGui::GetIO();
         io.DisplaySize = ImVec2((float)renderrect.width, (float)renderrect.height);
@@ -554,14 +558,12 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
 
         ImGui::Render();
 
-        zone = stream->zonebegin("imgui");
         imr.updatebuffer();
         // ORenderer::Stream *imstream = ORenderer::context->getsecondary();
         imr.fillstream(stream);
         // imr.updatebuffer();
         // imr.fillstream(&imstream);
         // stream->submitstream(imstream);
-        stream->zoneend(zone);
         // printf("done imgui.\n");
     }
 

@@ -25,10 +25,12 @@ namespace OVulkan {
     static void checkextensions(VkPhysicalDevice phy, struct extension *extensions, size_t count) {
         uint32_t propcount;
         VkResult res = enumextensions(phy, NULL, &propcount, NULL);
+        ASSERT(res == VK_SUCCESS, "Failed to enumerate extensions %d.\n", res);
         if (res == VK_SUCCESS && propcount > 0) {
             VkExtensionProperties *props = (VkExtensionProperties *)malloc(sizeof(VkExtensionProperties) * propcount);
             ASSERT(props != NULL, "Failed to allocate memory for Vulkan extension properties.\n");
             res = enumextensions(phy, NULL, &propcount, props);
+            ASSERT(res == VK_SUCCESS, "Failed to enumerate extensions %d.\n", res);
             for (size_t i = 0; i < propcount; i++) {
                 for (size_t j = 0; j < count; j++) {
                     if (!strcmp(extensions[j].name, props[i].extensionName)) {
@@ -360,78 +362,6 @@ namespace OVulkan {
         VK_VERTEX_INPUT_RATE_INSTANCE // RENDERER_RATEINSTANCE
     };
 
-
-    static void vulkan_genmips(VkImage image, uint32_t width, uint32_t height, VkImageAspectFlags aspectmask, uint32_t mips, VkPipelineStageFlags stages) {
-        VkCommandBuffer cmd = ((VulkanContext *)ORenderer::context)->beginimmediate();
-
-        VkImageMemoryBarrier barrier = { };
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.image = image;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.subresourceRange.aspectMask = aspectmask;
-        barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 1;
-        barrier.subresourceRange.levelCount = 1;
-
-        uint32_t mwidth = width;
-        uint32_t mheight = height;
-
-        for (size_t i = 1; i < mips; i++) {
-            barrier.subresourceRange.baseMipLevel = i - 1;
-            barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &barrier);
-
-            VkImageBlit blit = { };
-            blit.srcOffsets[0] = { };
-            blit.srcOffsets[1].x = mwidth;
-            blit.srcOffsets[1].y = mheight;
-            blit.srcOffsets[1].z = 1;
-            blit.srcSubresource.aspectMask = aspectmask;
-            blit.srcSubresource.mipLevel = i - 1; // use previous mip level as a basis for our current one
-            blit.srcSubresource.baseArrayLayer = 0;
-            blit.srcSubresource.layerCount = 1;
-            blit.dstOffsets[0] = {  };
-            blit.dstOffsets[1].x = mwidth > 1 ? mwidth / 2 : 1;
-            blit.dstOffsets[1].y = mheight > 1 ? mheight / 2 : 1;
-            blit.dstOffsets[1].z = 1; // destination should be one size smaller
-            blit.dstSubresource.aspectMask = aspectmask;
-            blit.dstSubresource.mipLevel = i;
-            blit.dstSubresource.baseArrayLayer = 0;
-            blit.dstSubresource.layerCount = 1;
-
-            vkCmdBlitImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR); // blit self (with smaller size)
-            barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, stages, 0, 0, NULL, 0, NULL, 1, &barrier);
-
-            if (mwidth > 1) {
-                mwidth /= 2;
-            }
-            if (mheight > 1) {
-                mheight /= 2;
-            }
-        }
-
-        barrier.subresourceRange.baseMipLevel = mips - 1;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-        // barrier transition for last mip level
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, stages, 0, 0, NULL, 0, NULL, 1, &barrier);
-
-        ((VulkanContext *)ORenderer::context)->endimmediate();
-    }
-
     VkCommandBuffer VulkanContext::beginimmediate(void) {
         // TODO: Consider another locking for this to prevent overwriting the immediate work of another thread.
         VkResult res = vkResetFences(this->dev, 1, &this->imfence);
@@ -668,27 +598,6 @@ namespace OVulkan {
         return ORenderer::RESULT_SUCCESS;
     }
 
-    static void vulkan_copybuffertoimage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
-        VkCommandBuffer cmd = ((VulkanContext *)ORenderer::context)->beginimmediate();
-
-        VkBufferImageCopy region = { 0 };
-        region.bufferOffset = 0;
-        region.bufferRowLength = 0;
-        region.bufferImageHeight = 0;
-
-        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        region.imageSubresource.mipLevel = 0;
-        region.imageSubresource.baseArrayLayer = 0;
-        region.imageSubresource.layerCount = 1;
-
-        region.imageOffset = (VkOffset3D) { 0 };
-        region.imageExtent = (VkExtent3D) { width, height, 1 };
-
-        vkCmdCopyBufferToImage(cmd, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-
-        ((VulkanContext *)ORenderer::context)->endimmediate();
-    }
-
     uint8_t VulkanContext::createtexture(struct ORenderer::texturedesc *desc, struct ORenderer::texture *texture) {
         ASSERT(desc != NULL, "Description must not be NULL.\n");
         ASSERT(texture != NULL, "Texture must not be NULL.\n");
@@ -712,7 +621,6 @@ namespace OVulkan {
         }
         this->resourcemutex.lock();
         struct texture *vktexture = &this->textures[texture->handle].vkresource;
-        VkResult res;
 
         VkImageCreateInfo imagecreate = { };
         imagecreate.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -736,11 +644,10 @@ namespace OVulkan {
         allocinfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
         allocinfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-        VmaAllocation alloc;
-        vmaCreateImage(this->allocator, &imagecreate, &allocinfo, &vktexture->image, &alloc, NULL);
-
-        VmaAllocationInfo info;
-        vmaGetAllocationInfo(this->allocator, alloc, &info);
+        VmaAllocation alloc = NULL;
+        VmaAllocationInfo info = { };
+        VkResult res = vmaCreateImage(this->allocator, &imagecreate, &allocinfo, &vktexture->image, &alloc, &info);
+        ASSERT(alloc != NULL, "Failed to create VMA allocation for texture %d.\n", res);
 
         vktexture->offset = info.offset;
         vktexture->memory = info.deviceMemory;
@@ -1002,10 +909,10 @@ namespace OVulkan {
             pipelayoutcreate.pSetLayouts = NULL;
         }
 
+        VkPushConstantRange range = { };
         if (desc->constantssize > 0) {
             pipelayoutcreate.pushConstantRangeCount = 1;
 
-            VkPushConstantRange range = { };
             range.offset = 0;
             range.size = desc->constantssize;
             range.stageFlags = VK_SHADER_STAGE_ALL;
@@ -1078,7 +985,7 @@ namespace OVulkan {
 
         VkVertexInputBindingDescription *binddescs = (VkVertexInputBindingDescription *)malloc(sizeof(VkVertexInputBindingDescription) * desc->vtxinput->bindcount);
         ASSERT(binddescs != NULL, "Failed to allocate memory for Vulkan vertex input bindings.\n");
-        VkVertexInputAttributeDescription *attribdescs = (VkVertexInputAttributeDescription *)malloc(sizeof(VkVertexInputBindingDescription));
+        VkVertexInputAttributeDescription *attribdescs = (VkVertexInputAttributeDescription *)malloc(sizeof(VkVertexInputAttributeDescription));
         ASSERT(attribdescs != NULL, "Failed to allocate memory for Vulkan input attributes.\n");
         size_t attribs = 0;
 
@@ -1089,7 +996,7 @@ namespace OVulkan {
             binddescs[i].inputRate = vulkan_inputratetable[bind.rate];
             attribs += bind.layout.attribcount;
             attribdescs = (VkVertexInputAttributeDescription *)realloc(attribdescs, sizeof(VkVertexInputAttributeDescription) * attribs);
-            ASSERT(attribdescs, "Failed to reallocate memory for Vulkan vertex input attributes.\n");
+            ASSERT(attribdescs != NULL, "Failed to reallocate memory for vertex input attribute descriptions.\n");
 
             for (size_t j = 0; j < bind.layout.attribcount; j++) {
                 attribdescs[j].binding = i;
@@ -1219,10 +1126,10 @@ namespace OVulkan {
             pipelayoutcreate.pSetLayouts = NULL;
         }
 
+        VkPushConstantRange range = { };
         if (desc->constantssize > 0) {
             pipelayoutcreate.pushConstantRangeCount = 1;
 
-            VkPushConstantRange range = { };
             range.offset = 0;
             range.size = desc->constantssize;
             range.stageFlags = VK_SHADER_STAGE_ALL;
@@ -1484,7 +1391,7 @@ namespace OVulkan {
     }
 
     uint8_t VulkanContext::getlatency(void) {
-        return this->frame;
+        return (uint8_t)(this->frame & 0xFF);
     }
 
     uint8_t VulkanContext::copybuffer(struct ORenderer::buffercopydesc *desc) {
@@ -1736,246 +1643,6 @@ namespace OVulkan {
         return ORenderer::RESULT_SUCCESS;
     }
 
-    void VulkanContext::interpretstream(VkCommandBuffer cmd, ORenderer::Stream *stream) {
-        ZoneScopedN("Interpret Stream");
-        stream->claim();
-        this->resourcemutex.lock();
-        TracyMessageL("begin interpret");
-        for (auto it = stream->cmd.begin(); it != stream->cmd.end(); it++) {
-            switch (it->type) {
-                case ORenderer::Stream::OP_DEBUGZONEBEGIN: {
-                    // printf("OP_DEBUGZONEBEGIN\n");
-#ifdef OMICRON_DEBUG
-                    void *mem = stream->tempmem.alloc(sizeof(tracy::VkCtxScope));
-                    // Initialise but using our preallocated memory for speed.
-                    it->zonebegin.zone = new (mem) tracy::VkCtxScope(this->tracyctx, TracyLine, TracyFile, strlen(TracyFile), TracyFunction, strlen(TracyFunction), it->zonebegin.name, strlen(it->zonebegin.name), cmd, true);
-#endif
-                    break;
-                }
-                case ORenderer::Stream::OP_DEBUGZONEEND: {
-#ifdef OMICRON_DEBUG
-                    // printf("OP_DEBUGZONEEND\n");
-                    tracy::VkCtxScope *zone = (tracy::VkCtxScope *)stream->cmd[it->zoneend].zonebegin.zone;
-                    zone->~VkCtxScope();
-#endif
-                    break;
-                }
-                case ORenderer::Stream::OP_BEGINRENDERPASS: {
-                    ZoneScopedN("OP_BEGINRENDERPASS");
-                    // printf("OP_BEGINRENDERPASS\n");
-                    size_t marker = stream->tempmem.getmarker();
-
-                    VkRenderPass rpass = this->renderpasses[it->renderpass.rpass.handle].vkresource.renderpass;
-                    VkFramebuffer fb = this->framebuffers[it->renderpass.fb.handle].vkresource.framebuffer;
-                    struct ORenderer::rect area = it->renderpass.area;
-                    struct ORenderer::clearcolourdesc clear = it->renderpass.clear;
-                    VkRenderPassBeginInfo passbegin = { };
-                    passbegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-                    passbegin.pNext = NULL;
-                    passbegin.renderPass = rpass;
-                    passbegin.framebuffer = fb;
-                    passbegin.renderArea.offset = (VkOffset2D) { .x = area.x, .y = area.y };
-                    passbegin.renderArea.extent = (VkExtent2D) { .width = area.width, .height = area.height };
-                    passbegin.clearValueCount = clear.count;
-                    VkClearValue *clearvalues = (VkClearValue *)stream->tempmem.alloc(sizeof(VkClearValue) * clear.count);
-                    for (size_t i = 0; i < clear.count; i++) {
-                        if (clear.clear[i].isdepth) {
-                            clearvalues[i].depthStencil = { .depth = clear.clear[i].depth, .stencil = clear.clear[i].stencil };
-                        } else {
-                            clearvalues[i].color = { clear.clear[i].colour.r, clear.clear[i].colour.g, clear.clear[i].colour.b, clear.clear[i].colour.a };
-                        }
-                    }
-                    passbegin.pClearValues = clearvalues;
-                    {
-                        TracyVkZone(this->tracyctx, cmd, "Begin Renderpass");
-                        ZoneScopedN("Begin Renderpass (CPU)");
-                        vkCmdBeginRenderPass(cmd, &passbegin, VK_SUBPASS_CONTENTS_INLINE);
-                    }
-                    stream->tempmem.freeto(marker);
-                    break;
-                }
-                case ORenderer::Stream::OP_ENDRENDERPASS: {
-                    ZoneScopedN("OP_ENDRENDERPASS");
-                    // printf("OP_ENDRENDERPASS\n");
-                    vkCmdEndRenderPass(cmd);
-                    break;
-                }
-                case ORenderer::Stream::OP_SETVIEWPORT: {
-                    ZoneScopedN("OP_SETVIEWPORT");
-                    // printf("OP_SETVIEWPORT\n");
-                    struct ORenderer::viewport viewport = it->viewport;
-                    VkViewport vkviewport;
-                    vkviewport.x = viewport.x;
-                    vkviewport.y = viewport.y;
-                    vkviewport.width = viewport.width;
-                    vkviewport.height = viewport.height;
-                    vkviewport.minDepth = viewport.mindepth;
-                    vkviewport.maxDepth = viewport.maxdepth;
-                    vkCmdSetViewport(cmd, 0, 1, &vkviewport);
-                    break;
-                }
-                case ORenderer::Stream::OP_SETSCISSOR: {
-                    ZoneScopedN("OP_SETSCISSOR");
-                    // printf("OP_SETSCISSOR\n");
-                    struct ORenderer::rect scissor = it->scissor;
-                    VkRect2D vkscissor;
-                    vkscissor.extent = (VkExtent2D) { .width = scissor.width, .height = scissor.height };
-                    vkscissor.offset = (VkOffset2D) { .x = scissor.x, .y = scissor.y };
-                    vkCmdSetScissor(cmd, 0, 1, &vkscissor);
-                    break;
-                }
-                case ORenderer::Stream::OP_SETPIPELINESTATE: {
-                    ZoneScopedN("OP_SETPIPELINESTATE");
-                    // printf("OP_SETPIPELINESTATE\n");
-                    struct ORenderer::pipelinestate state = it->pipeline;
-                    stream->pipelinestate = state;
-                    struct pipelinestate *vkstate = &this->pipelinestates[state.handle].vkresource;
-                    vkCmdBindPipeline(cmd, vkstate->type == ORenderer::GRAPHICSPIPELINE ? VK_PIPELINE_BIND_POINT_GRAPHICS : VK_PIPELINE_BIND_POINT_COMPUTE, vkstate->pipeline);
-                    stream->mappings.clear(); // reset mappings so we're only using our current pipeline's descriptor set mappings
-                    break;
-                }
-                case ORenderer::Stream::OP_DRAW: {
-                    ZoneScopedN("OP_DRAW");
-                    // printf("OP_DRAW\n");
-                    vkCmdDraw(cmd, it->draw.vtxcount, it->draw.instancecount, it->draw.firstvtx, it->draw.firstinstance);
-                    break;
-                }
-                case ORenderer::Stream::OP_DRAWINDEXED: {
-                    ZoneScopedN("OP_DRAWINDEXED");
-                    // printf("OP_DRAWINDEXED\n");
-                    vkCmdDrawIndexed(cmd, it->drawindexed.idxcount, it->drawindexed.instancecount, it->drawindexed.firstidx, it->drawindexed.vtxoffset, it->drawindexed.firstinstance);
-                    break;
-                }
-                case ORenderer::Stream::OP_SETVTXBUFFERS: {
-                    ZoneScopedN("OP_SETVTXBUFFERS");
-                    // printf("OP_SETVTXBUFFERS\n");
-                    struct ORenderer::buffer *buffers = it->vtxbuffers.buffers;
-
-                    size_t marker = stream->tempmem.getmarker();
-
-                    VkBuffer *vkbuffers = (VkBuffer *)stream->tempmem.alloc(sizeof(VkBuffer) * it->vtxbuffers.bindcount);
-                    for (size_t i = 0; i < it->vtxbuffers.bindcount; i++) {
-                        struct buffer *vkbuffer = &this->buffers[buffers[i].handle].vkresource;
-                        vkbuffers[i] = vkbuffer->buffer[0];
-                    }
-                    vkCmdBindVertexBuffers(cmd, 0, 1, vkbuffers, it->vtxbuffers.offsets);
-                    stream->tempmem.freeto(marker);
-                    break;
-                }
-                case ORenderer::Stream::OP_SETIDXBUFFER: {
-                    ZoneScopedN("OP_SETIDXBUFFER");
-                    // printf("OP_SETIDXBUFFER\n");
-                    struct buffer *buffer = &this->buffers[it->idxbuffer.buffer.handle].vkresource;
-                    vkCmdBindIndexBuffer(cmd, buffer->buffer[0], it->idxbuffer.offset, it->idxbuffer.index32 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
-                    break;
-                }
-                case ORenderer::Stream::OP_BINDRESOURCE: {
-                    ZoneScopedN("OP_BINDRESOURCE");
-                    // printf("OP_BINDRESOURCE\n");
-                    switch (it->resource.type) {
-                        case ORenderer::RESOURCE_UNIFORM:
-                        case ORenderer::RESOURCE_STORAGE:
-                            stream->mappings.push_back((struct ORenderer::pipelinestateresourcemap) { .binding = it->resource.binding, .type = it->resource.type, .bufferbind = it->resource.bufferbind });
-                        case ORenderer::RESOURCE_SAMPLER:
-                        case ORenderer::RESOURCE_STORAGETEXTURE:
-                            stream->mappings.push_back((struct ORenderer::pipelinestateresourcemap) { .binding = it->resource.binding, .type = it->resource.type, .sampledbind = it->resource.sampledbind });
-                            break;
-                    }
-                    break;
-                }
-                case ORenderer::Stream::OP_TRANSITIONLAYOUT: {
-                    ZoneScopedN("OP_TRANSITIONLAYOUT");
-                    // printf("OP_TRANSITIONLAYOUT\n");
-                    struct texture *vktexture = &this->textures[it->layout.texture.handle].vkresource;
-                    // OVulkan::transitionlayout(cmd, vktexture, it->layout.format, it->layout.state);
-                    break;
-                }
-                case ORenderer::Stream::OP_COMMITRESOURCES: {
-                    ZoneScopedN("OP_COMMITRESOURCES");
-                    // printf("OP_COMMITRESOURCES\n");
-                    ASSERT(stream->pipelinestate.handle != RENDERER_INVALIDHANDLE, "Attempted to commit resources before deciding pipeline state.\n");
-                    size_t marker = stream->tempmem.getmarker();
-
-                    VkWriteDescriptorSet *wds = (VkWriteDescriptorSet *)stream->tempmem.alloc(sizeof(VkWriteDescriptorSet) * stream->mappings.size());
-                    // XXX: Always be careful about scope! Higher optimisation levels seem to treat anything even one level out of scope as invalid (so we should make sure not to let that happen!)
-                    VkDescriptorBufferInfo *buffinfos = (VkDescriptorBufferInfo *)stream->tempmem.alloc(sizeof(VkDescriptorBufferInfo) * stream->mappings.size());
-                    VkDescriptorImageInfo *imginfos = (VkDescriptorImageInfo *)stream->tempmem.alloc(sizeof(VkDescriptorImageInfo) * stream->mappings.size()); // we're allocating with worst case in mind
-                    for (size_t i = 0; i < stream->mappings.size(); i++) {
-                        wds[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        wds[i].pNext = NULL;
-                        wds[i].dstBinding = stream->mappings[i].binding;
-                        wds[i].dstSet = this->pipelinestates[stream->pipelinestate.handle].vkresource.descsets[this->frame];
-                        wds[i].dstArrayElement = 0;
-                        wds[i].descriptorCount = 1;
-                        if (stream->mappings[i].type == ORenderer::RESOURCE_UNIFORM || stream->mappings[i].type == ORenderer::RESOURCE_STORAGE) {
-                            struct ORenderer::bufferbind bind = stream->mappings[i].bufferbind;
-                            struct buffer *buffer = &this->buffers[bind.buffer.handle].vkresource;
-                            wds[i].descriptorType = descriptortypetable[stream->mappings[i].type];
-                            buffinfos[i].buffer = buffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? buffer->buffer[this->frame] : buffer->buffer[0];
-                            buffinfos[i].offset = bind.offset;
-                            buffinfos[i].range = bind.range == SIZE_MAX ? VK_WHOLE_SIZE : bind.range;
-                            wds[i].pBufferInfo = &buffinfos[i];
-                        } else if (stream->mappings[i].type == ORenderer::RESOURCE_SAMPLER || stream->mappings[i].type == ORenderer::RESOURCE_STORAGETEXTURE) {
-                            struct ORenderer::sampledbind bind = stream->mappings[i].sampledbind;
-                            struct sampler *sampler = &this->samplers[bind.sampler.handle].vkresource;
-                            struct textureview *view = &this->textureviews[bind.view.handle].vkresource;
-                            wds[i].descriptorType = descriptortypetable[stream->mappings[i].type];
-                            imginfos[i].sampler = sampler->sampler;
-                            imginfos[i].imageView = view->imageview;
-                            imginfos[i].imageLayout = layouttable[bind.layout];
-                            wds[i].pImageInfo = &imginfos[i];
-                        }
-                    }
-
-                    struct pipelinestate *pipelinestate = &this->pipelinestates[stream->pipelinestate.handle].vkresource;
-                    {
-                        ZoneScopedN("push descriptor\n");
-                        vkCmdPushDescriptorSetKHR(cmd, pipelinestate->type == ORenderer::GRAPHICSPIPELINE ? VK_PIPELINE_BIND_POINT_GRAPHICS : VK_PIPELINE_BIND_POINT_COMPUTE, pipelinestate->pipelinelayout, 0, stream->mappings.size(), wds);
-                    }
-
-
-                    stream->mappings.clear();
-                    stream->tempmem.freeto(marker);
-                    break;
-                }
-                case ORenderer::Stream::OP_COPYBUFFERIMAGE: {
-                    ZoneScopedN("OP_COPYBUFFERIMAGE");
-                    // printf("OP_COPYBUFFERIMAGE\n");
-                    struct ORenderer::bufferimagecopy region = it->copybufferimage.region;
-                    struct buffer *buffer = &this->buffers[it->copybufferimage.buffer.handle].vkresource;
-                    struct texture *texture = &this->textures[it->copybufferimage.texture.handle].vkresource;
-                    VkBufferImageCopy vkregion = { };
-                    vkregion.bufferOffset = region.offset;
-                    vkregion.bufferRowLength = region.rowlen;
-                    vkregion.bufferImageHeight = region.imgheight;
-                    vkregion.imageSubresource.aspectMask =
-                        (region.aspect & ORenderer::ASPECT_COLOUR ? VK_IMAGE_ASPECT_COLOR_BIT : 0) |
-                        (region.aspect & ORenderer::ASPECT_DEPTH ? VK_IMAGE_ASPECT_DEPTH_BIT : 0) |
-                        (region.aspect & ORenderer::ASPECT_STENCIL ? VK_IMAGE_ASPECT_STENCIL_BIT : 0) |
-                        0;
-                    vkregion.imageSubresource.mipLevel = region.mip;
-                    vkregion.imageSubresource.layerCount = region.layercount;
-                    vkregion.imageSubresource.baseArrayLayer = region.baselayer;
-                    vkregion.imageExtent = { (uint32_t)region.imgextent.width, (uint32_t)region.imgextent.height, (uint32_t)region.imgextent.depth };
-                    vkregion.imageOffset = { (int32_t)region.imgoff.x, (int32_t)region.imgoff.y, (int32_t)region.imgoff.z };
-                    vkCmdCopyBufferToImage(cmd, buffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? buffer->buffer[this->frame] : buffer->buffer[0], texture->image, layouttable[texture->state], 1, &vkregion);
-                    break;
-                }
-                case ORenderer::Stream::OP_STAGEDMEMCOPY: {
-
-
-                    // memcpy(it->stagedmemcopy.dst, it->stagedmemcopy.src, it->stagedmemcopy.size);
-                    break;
-                }
-            }
-        }
-
-        this->resourcemutex.unlock();
-        TracyMessageL("end interpret");
-        // stream->mutex.unlock();
-        stream->release();
-    }
-
     uint8_t VulkanContext::submitstream(ORenderer::Stream *stream, bool wait) {
         ASSERT(stream != NULL, "Stream must not be NULL.\n");
         stream->claim();
@@ -2113,7 +1780,7 @@ namespace OVulkan {
             if (clear.clear[i].isdepth) {
                 values[i].depthStencil = { .depth = clear.clear[i].depth, .stencil = clear.clear[i].stencil };
             } else {
-                values[i].color = { clear.clear[i].colour.r, clear.clear[i].colour.g, clear.clear[i].colour.b, clear.clear[i].colour.a };
+                values[i].color = { .float32 = { clear.clear[i].colour.r, clear.clear[i].colour.g, clear.clear[i].colour.b, clear.clear[i].colour.a } };
             }
         }
         begin.pClearValues = values;
@@ -2143,7 +1810,7 @@ namespace OVulkan {
             struct buffer *buffer = &this->context->buffers[buffers->handle].vkresource;
             vkbuffers[i] = buffer->buffer[buffer->flags & ORenderer::BUFFERFLAG_PERFRAME ? this->context->frame : 0];
         }
-        vkCmdBindVertexBuffers(this->cmd, 0, bindcount, vkbuffers, offsets);
+        vkCmdBindVertexBuffers(this->cmd, firstbind, bindcount, vkbuffers, offsets);
         this->tempmem.freeto(marker);
     }
 
@@ -2349,33 +2016,6 @@ namespace OVulkan {
         ASSERT(res == VK_SUCCESS, "Failed to end Vulkan command buffer %d.\n", res);
     }
 
-    void VulkanContext::recordcmd(VkCommandBuffer cmd, uint32_t image, VulkanStream *stream) {
-        VkCommandBufferBeginInfo cmdbegin = { };
-        cmdbegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        cmdbegin.pNext = NULL;
-        cmdbegin.flags = 0;
-        cmdbegin.pInheritanceInfo = NULL;
-
-        stream->claim();
-
-        VkResult res = vkBeginCommandBuffer(stream->cmd, &cmdbegin);
-        ASSERT(res == VK_SUCCESS, "Failed to begin Vulkan command buffer %d.\n", res);
-
-        this->scratchbuffers[this->frame].reset();
-
-        {
-            // TracyVkZoneS(this->tracyctx, cmd, "Record Command Buffer", 4);
-            // TracyVkZoneTransient(this->tracyctx, _ttz, cmd, data, true); // Use transient zones when names need to be dynamic
-            // do stuff
-            // this->interpretstream(cmd, stream);
-        }
-
-        TracyVkCollect(tracyctx, cmd);
-        res = vkEndCommandBuffer(cmd);
-        ASSERT(res == VK_SUCCESS, "Failed to end Vulkan command buffer recording %d.\n", res);
-        stream->release();
-    }
-
     VkShaderModule VulkanContext::createshadermodule(ORenderer::Shader shader) {
         VkShaderModuleCreateInfo shadercreate = { };
         shadercreate.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -2439,7 +2079,6 @@ namespace OVulkan {
     }
 
     void VulkanContext::createswapchainviews(void) {
-        VkResult res;
         VkImage images[VULKAN_MAXBACKBUFFERS];
         vkGetSwapchainImagesKHR(this->dev, this->swapchain, &this->swaptexturecount, NULL);
 
@@ -2879,7 +2518,8 @@ namespace OVulkan {
         // The benefits of having separate async queues is pretty clear, we can keep operations as concurrent as possible and avoid stalls where we have to wait for (ie.) a combined transfer+compute queue to finish its work on texture uploads only for the compute work to be performed.
 
         std::vector<VkDeviceQueueCreateInfo> queuecreate;
-        float prio = 1.0f;
+        // Use a size of three here as that's most a single create struct will use.
+        float prio[3] = { 1.0f, 1.0f, 1.0f };
         ASSERT(foundinitial, "Failed to find a suitable queue family for main compute+rasterise setup!\n");
 
         VkDeviceQueueCreateInfo queueinfo = { };
@@ -2887,28 +2527,25 @@ namespace OVulkan {
         queueinfo.pNext = NULL;
         queueinfo.queueCount = 1;
         queueinfo.queueFamilyIndex = initialfamily;
-        queueinfo.pQueuePriorities = &prio;
+        queueinfo.pQueuePriorities = prio;
         queueinfo.flags = 0;
         queuecreate.push_back(queueinfo);
 
         if (uniquetransfer) {
             queueinfo.queueCount = 1;
             queueinfo.queueFamilyIndex = transferfamily;
-            queueinfo.pQueuePriorities = &prio;
             queuecreate.push_back(queueinfo);
         }
 
         if (uniquecompute) {
             queueinfo.queueCount = 1;
             queueinfo.queueFamilyIndex = computefamily;
-            queueinfo.pQueuePriorities = &prio;
             queuecreate.push_back(queueinfo);
         }
 
         if (uniquepresent) {
             queueinfo.queueCount = 1;
             queueinfo.queueFamilyIndex = presentfamily;
-            queueinfo.pQueuePriorities = &prio;
             queuecreate.push_back(queueinfo);
         }
 
@@ -2923,7 +2560,6 @@ namespace OVulkan {
                 queueinfo.queueCount = 1;
             }
             queueinfo.queueFamilyIndex = transferfamily; // doesn't matter which one here because they'll both end up pointing to the same thing.
-            queueinfo.pQueuePriorities = &prio;
             queuecreate.push_back(queueinfo);
         }
 
@@ -3320,7 +2956,10 @@ namespace OVulkan {
         this->stream[this->frame].flushcmd();
         this->scratchbuffers[this->frame].reset(); // Reset scratchbuffers.
 
+        // printf("pipeline begin.\n");
+        ASSERT(pipeline != NULL, "It's so over!\n");
         pipeline->execute(&this->stream[this->frame], cam);
+        // printf("pipeline end.\n");
 
         // this->recordcmd(this->cmd[this->frame], image, &stream[this->frame]);
 

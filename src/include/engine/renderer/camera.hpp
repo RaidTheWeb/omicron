@@ -11,7 +11,7 @@ namespace ORenderer {
             // Horizontal Field of View
             float fov = 60.0f;
             // Aspect Ratio (w / h)
-            float ar = 16 / 9;
+            float ar = 16.0f / 9.0f;
 
             // Clipping planes (near)
             float near = 0.1f;

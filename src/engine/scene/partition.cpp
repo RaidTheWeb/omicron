@@ -269,14 +269,17 @@ namespace OScene {
 
 
         struct work work = { .idx = &workeridx, .list = &list, .frustum = &frustum, .manager = this };
-        OJob::Counter counter = OJob::Counter();
+        OJob::Counter *counter = new OJob::Counter();
         for (size_t i = 0; i < this->cells.size() / OJob::numworkers; i++) { // Distribute work across the number of workers (not an exact science, only a best case average so that we have a possibility of all the work happening properly distributed).
             OJob::Job *job = new OJob::Job(cullworker, (uintptr_t)&work);
-            job->counter = &counter;
+            job->counter = counter;
             OJob::kickjob(job);
         }
 
-        counter.wait();
+
+        // printf("pre wait.\n");
+        counter->wait();
+        delete counter;
 
         return list.detach(); // Detach list from the handler.
     }

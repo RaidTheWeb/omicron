@@ -48,29 +48,6 @@ void *utils_generatemips(void *fullsize, int size, int bpp, size_t *length) {
     return mipchain;
 }
 
-float *utils_loadexr(char *file) {
-    // exr_context_initializer_t ctx = EXR_DEFAULT_CONTEXT_INITIALIZER;
-    // exr_context_t f;
-    // exr_result_t res = exr_start_read(&f, file, &ctx);
-    // if (res != EXR_ERR_SUCCESS) {
-    //     printf("failed to load EXR image data\n");
-    //     exit(1);
-    // }
-    //
-    // exr_attr_box2i_t window;
-    // res = exr_get_data_window(f, 0, &window);
-    // if (res != EXR_ERR_SUCCESS) {
-    //     printf("failed to read EXR image data\n");
-    //     exit(1);
-    // }
-    // printf("image data success!\n");
-    // printf("%ux%u\n", window.max.x - window.min.x + 1, window.max.y - window.min.y + 1);
-    //
-    // float *data = NULL;
-    // exit(0);
-    return NULL;
-}
-
 bool utils_checkktxpath(const char *filename) {
     ktxTexture *texture;
     KTX_error_code r = ktxTexture_CreateFromNamedFile(filename, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture);

@@ -420,7 +420,7 @@ namespace ORenderer {
             desc.memlayout = MEMLAYOUT_OPTIMAL;
             desc.usage = USAGE_SAMPLED | USAGE_DST | USAGE_SRC;
             context->createtexture(&desc, &texture);
-
+            
             struct textureview textureview = { };
             struct textureviewdesc viewdesc = { };
             viewdesc.texture = texture;

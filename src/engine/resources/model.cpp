@@ -176,9 +176,10 @@ namespace OResource {
             for (size_t i = 0; i < mesh->mNumFaces; i++) {
                 aiFace face = mesh->mFaces[i];
                 ASSERT(face.mNumIndices == 3, "Degenerate triangle of %u indices.\n", mesh->mFaces[i].mNumIndices);
-                omesh.indices[indicesidx++] = face.mIndices[0];
-                omesh.indices[indicesidx++] = face.mIndices[1];
-                omesh.indices[indicesidx++] = face.mIndices[2];
+                // XXX: Consider increasing indices count because otherwise we are severely limited.
+                omesh.indices[indicesidx++] = (uint16_t)face.mIndices[0];
+                omesh.indices[indicesidx++] = (uint16_t)face.mIndices[1];
+                omesh.indices[indicesidx++] = (uint16_t)face.mIndices[2];
             }
 
             // omesh.header.material = UINT32_MAX; // Invalid material ID

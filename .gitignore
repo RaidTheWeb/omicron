@@ -26,3 +26,8 @@ misc/
 **.bin
 **.cap
 omicron_symbols.ld
+.vscode/
+**.plist
+**.plist.source
+**.cpp_clang-tidy**
+**.c_clang-tidy**

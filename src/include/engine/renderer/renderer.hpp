@@ -1068,7 +1068,7 @@ namespace ORenderer {
             // Request information pertaining to the current size of the backbuffer and the selected data format for it.
             virtual uint8_t requestbackbufferinfo(struct backbufferinfo *info) { return RESULT_SUCCESS; }
             // Request a reference to the current frame's scratchbuffer.
-            virtual uint8_t requestscratchbuffer(ScratchBuffer **scratchbuffer) { return RESULT_SUCCESS; };
+            virtual ScratchBuffer *requestscratchbuffer(void) { return NULL; };
             // Transition texture between image layouts.
             virtual uint8_t transitionlayout(struct texture texture, size_t format, size_t state) { return RESULT_SUCCESS; }
 

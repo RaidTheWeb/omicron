@@ -14,7 +14,7 @@ namespace OResource {
         ASSERT(size != SIZE_MAX, "Failed to determine file size of RPAK.\n");
         ASSERT(!fseek(f, 0, SEEK_SET), "Failed to rewind read pointer back to beginning of RPAK.\n");
 
-        struct RPak::header header = { 0 };
+        struct RPak::header header = { };
         ASSERT(fread(&header, sizeof(struct RPak::header), 1, f), "Failed to read RPAK header.\n");
         ASSERT(!strncmp(header.magic, "RPAK", sizeof(header.magic)), "Attempting to mount RPAK file that does not display magic.\n");
 
@@ -61,10 +61,6 @@ namespace OResource {
 
         return 0;
     found:
-        size_t finalsize = size;
-        if (off + size > entry->uncompressedsize) {
-            finalsize = size - ((off + size) - entry->uncompressedsize);
-        }
         ASSERT(!fseek(this->file, entry->offset + off, SEEK_SET), "Failed to seek file offset for path `%s` in RPAK.\n", path);
         if (true) {
             ASSERT(fread(buf, size, 1, this->file), "Failed to read file from RPAK.\n");
@@ -107,7 +103,7 @@ namespace OResource {
                 // }
                 snprintf(fpath, 512, "%s/%s", path, dir->d_name);
 
-                struct RPak::tableentry entry = { 0 };
+                struct RPak::tableentry entry = { };
                 FILE *f = fopen(fpath, "r");
                 ASSERT(f, "Failed to open file for RPAK packaging.\n");
                 ASSERT(!fseek(f, 0, SEEK_END), "Failed to seek end of file to determine size for RPAK packaging.\n");
@@ -179,7 +175,7 @@ namespace OResource {
         ASSERT(strlen(path) < 512, "Path too long.\n");
         ASSERT(strlen(output) < 64, "Output path too long.\n");
 
-        struct RPak::header header = { 0 };
+        struct RPak::header header = { };
         strcpy(header.magic, "RPAK");
         header.version = RPAK_FORMATVERSION;
         header.contentversion = 1;
@@ -212,10 +208,10 @@ namespace OResource {
         free(tables);
 
         for (size_t i = 0; i < dataidx; i++) {
-            struct RPak::data rdata = data[i];
-            memcpy(rpakdata + off, data[i].data, data[i].size);
-            off += data[i].size;
-            free(data[i].data);
+            struct RPak::data *rdata = &data[i];
+            memcpy(rpakdata + off, rdata->data, rdata->size);
+            off += rdata->size;
+            free(rdata->data);
         }
         free(data);
 

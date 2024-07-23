@@ -84,7 +84,6 @@ int main(int argc, const char **argv) {
     // vulkan_init(&init);
     ORenderer::context = new OVulkan::VulkanContext(&init);
 
-    struct ORenderer::renderer *renderer = ORenderer::initrenderer();
     // camera_init(renderer);
 
     OResource::RPak rpak = OResource::RPak("test.rpak");
@@ -319,7 +318,9 @@ int main(int argc, const char **argv) {
         }
 
         // vulkan_frame(&pipeline);
+        // printf("entering execute.\n");
         ((OVulkan::VulkanContext *)ORenderer::context)->execute(&pipeline, &camera);
+        // printf("leaving execute.\n");
         FrameMark;
         // break;
         // return 0;

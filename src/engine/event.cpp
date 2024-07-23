@@ -35,7 +35,7 @@ void event_relinquish(struct event_listener *listener) {
     OJob::ScopedMutex mutex(&event_listenermutex);
     for (auto it = event_listeners.begin(); it != event_listeners.end(); it++) {
         struct event_listener value = *it;
-        if (!memcmp(&value, listener, sizeof(struct event_listener))) {
+        if (value.func == listener->func && value.type == listener->type && value.self == listener->self) {
             it = event_listeners.erase(it); // remove listener from list
         }
     }
@@ -99,7 +99,7 @@ void event_dispatch(struct event *event) {
 
 void event_dispatchevents(uint64_t time) {
     struct event *requeue[1024];
-    size_t requeueidx;
+    size_t requeueidx = 0;
     while (true) {
         struct event *event = (struct event *)event_events.pop();
         if (event == NULL) {

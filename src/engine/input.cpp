@@ -11,7 +11,7 @@ static void input_joystickevent(uint8_t jid, int event) {
         input_manager.controllers[jid].id = jid; // initially set up our id (just for referencing ourselves based on the id we have)
         printf("Controller device '%s' connected on %u\n", input_manager.controllers[jid].name, jid);
         input_manager.controllers[jid].state.connected = true; // connection will be only accepted on a working "gamepad"
-        struct event event = { 0 };
+        struct event event = { };
         event.type = utils_stringid("omicron_controllerconnect");
         event.numargs = 1;
         event.args[0] = jid;
@@ -21,7 +21,7 @@ static void input_joystickevent(uint8_t jid, int event) {
         printf("Controller device '%s' disconnected from %u\n", input_manager.controllers[jid].name, jid);
         input_manager.controllers[jid].name = "Unknown";
         input_manager.controllers[jid].state.connected = false;
-        struct event event = { 0 };
+        struct event event = { };
         event.type = utils_stringid("omicron_controllerdisconnect");
         event.numargs = 1;
         event.args[0] = jid;
@@ -31,6 +31,9 @@ static void input_joystickevent(uint8_t jid, int event) {
 }
 
 static void input_keyboard(GLFWwindow *window, int key, int scancode, int action, int mods) {
+    (void)window;
+    (void)scancode;
+    (void)mods;
     input_manager.keys[key] = action;
 }
 
@@ -41,7 +44,7 @@ void input_init(void) {
             input_manager.controllers[i].id = i; // initially set up our id (just for referencing ourselves based on the id we have)
             printf("Controller device '%s' connected on %lu\n", input_manager.controllers[i].name, i);
             input_manager.controllers[i].state.connected = true; // connection will be only accepted on a working "gamepad"
-            struct event event = { 0 };
+            struct event event = { };
             event.type = utils_stringid("omicron_controllerconnect");
             event.numargs = 1;
             event.args[0] = i;

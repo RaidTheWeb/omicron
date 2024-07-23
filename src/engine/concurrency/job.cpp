@@ -87,7 +87,6 @@ namespace OJob {
         ASSERT(OJob::currentworker != NULL, "Yield called outside of job system or with invalid worker.\n");
         ASSERT(OJob::currentworker->ctx.uc_mcontext.fpregs->rip != 0, "Invalid RIP.\n");
         swapcontext(&OJob::currentfibre->ctx, &OJob::currentworker->ctx); // Swap to worker context.
-        // coroutine_yield(fibre->co);
     }
 
     void kickjob(OJob::Job *job) {
@@ -95,7 +94,7 @@ namespace OJob {
         ASSERT(job->priority < Job::PRIORITY_COUNT, "Invalid job priority %u.\n", job->priority);
 
         if (job->counter != NULL) {
-            job->counter->reference(job);
+            job->counter->reference();
             pthread_spin_trylock(&job->counter->lock);
         }
 
@@ -114,16 +113,12 @@ namespace OJob {
 
     void Counter::unreference(void) {
         ZoneScopedN("Counter Unreference");
-        // printf("unref trace: %lu\n", this->waitlist.size());
         pthread_spin_lock(&this->waitlistlock);
         this->ref.fetch_sub(1);
 
 
         COMPILER_BARRIER();
         if (this->ref.load() <= 0) {
-            // printf("unref trace: %lu\n", this->waitlist.size());
-
-            // printf("[%d] %lu\n", currentworker->id, this->waitlist.size());
             for (size_t i = 0; i < this->waitlist.size(); i++) {
                 OJob::Fibre **it = &this->waitlist[i];
                 ASSERT((*it) != NULL, "Invalid fibre on queue.\n");
@@ -157,18 +152,10 @@ namespace OJob {
             COMPILER_BARRIER();
             pthread_spin_lock(&this->lock);
             pthread_spin_unlock(&this->lock);
-
-            // while (this->ref.load() != 0) {
-                // asm ("pause");
-            // }
         }
     }
 
     void Semaphore::wait(void) {
-        if (this->counter.ref.load() == 0) {
-            return; // Early exit if the couner is empty (aka. already triggered).
-        }
-
         this->counter.wait(); // Just make us wait on a counter.
     }
 
@@ -227,7 +214,6 @@ namespace OJob {
     }
 
     [[noreturn]] static void fibre(OJob::Fibre *fibre) {
-        // OJob::Fibre *fibre = (OJob::Fibre *)co->userdata;
         for (;;) {
             OJob::Job *job = fibre->job;
             ASSERT(job != NULL, "Fibre %lu being run without a job!\n", fibre->id);
@@ -236,9 +222,7 @@ namespace OJob {
 
             fibre->tounref.store(job->counter); // Inform the worker we need to unreference this counter.
 
-            // job->fibre = NULL;
             job->allgood.store(true);
-            // fibre->job = NULL;
             // XXX: Stack smashing here?
             delete job; // Early delete job before yielding.
 
@@ -271,8 +255,6 @@ namespace OJob {
             ASSERT(decl != NULL, "Job queues are empty yet availability check signalled they weren't\n");
             ASSERT(!decl->allgood.load(), "Rescheduling an already completed job %lu.\n", decl->id);
 
-            // OJob::Fibre *fibre = decl->fibre != NULL ? decl->fibre : OJob::getfibre();
-
             OJob::Fibre *fibre = NULL;
             if (decl->fibre != NULL) {
                 fibre = decl->fibre; // Resume with existing encapsulating fibre.
@@ -290,9 +272,6 @@ namespace OJob {
 
             OJob::currentfibre = fibre;
             TracyFiberEnter(fibre->name);
-            // ASSERT(fibre->co != NULL, "Invalid coroutine for fibre.\n");
-            // printf("[%ld] resuming co-routine for %lu.\n", utils_getcounter(), decl->id);
-            // coroutine_resume(fibre->co);
 
             // XXX: non-x86 hostile.
             ASSERT(fibre->ctx.uc_mcontext.fpregs->rip != 0, "Invalid RIP.\n");
@@ -331,7 +310,6 @@ namespace OJob {
             }
 
             if (fibre->yieldstatus == OJob::Job::STATUS_DONE) {
-                // printf("[%ld] cleaning up.\n", utils_getcounter());
                 if (fibre->tounref != NULL) {
                     fibre->tounref.load()->unreference(); // unreference when done.
                     fibre->tounref.store(NULL);
@@ -379,16 +357,10 @@ namespace OJob {
 
         for (size_t i = 0; i < FIBRE_COUNT; i++) {
             OJob::Fibre *fibre = new OJob::Fibre(); // we can afford to use the heap here as we only ever allocate this once
-            // struct coroutine_desc desc = coroutine_initdesc(OJob::fibre, 0);
-            // desc.userdata = fibre;
             fibre->id = i;
             fibre->name = (char *)malloc(16);
             ASSERT(fibre->name != NULL, "Failed to allocate memory for fibre debug name.\n");
             snprintf(fibre->name, 32, "Fibre %lu", fibre->id);
-            // struct coroutine *co;
-            // int res = coroutine_create(&co, &desc);
-            // ASSERT(!res, "Coroutine could not be created.\n");
-            // fibre->co = co;
 
             getcontext(&fibre->ctx);
 

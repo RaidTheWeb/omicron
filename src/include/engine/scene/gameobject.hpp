@@ -416,7 +416,6 @@ namespace OScene {
             }
 
             bool hascomponent(uint32_t type) {
-                ZoneScoped;
                 COMPONENT_HASRESOLVER(
                     COMPONENT_HASRESOLUTION(OUtils::STRINGID("ModelInstance"));
                     COMPONENT_HASRESOLUTION(OUtils::STRINGID("SpotLight"));
@@ -424,7 +423,6 @@ namespace OScene {
             }
 
             OUtils::Handle<Component> getcomponent(uint32_t type) {
-                ZoneScoped;
                 COMPONENT_GETRESOLVER(
                     COMPONENT_GETRESOLUTION(OUtils::STRINGID("ModelInstance"), this->model);
                     COMPONENT_GETRESOLUTION(OUtils::STRINGID("SpotLight"), this->light);

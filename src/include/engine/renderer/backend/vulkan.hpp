@@ -479,9 +479,8 @@ namespace OVulkan {
             // Request a copy of the backbuffer (in a Vulkan setting, this'll be a framebuffer pointing to the current swapchain image)
             uint8_t requestbackbuffer(struct ORenderer::framebuffer *framebuffer);
             uint8_t requestbackbufferinfo(struct ORenderer::backbufferinfo *info);
-            uint8_t requestscratchbuffer(ORenderer::ScratchBuffer **scratchbuffer) {
-                *scratchbuffer = &this->scratchbuffers[this->frame];
-                return ORenderer::RESULT_SUCCESS;
+            ORenderer::ScratchBuffer *requestscratchbuffer(void) {
+                return &this->scratchbuffers[this->frame];
             }
             uint8_t requestbackbuffertexture(struct ORenderer::texture *texture) {
                 *texture = this->swaptextures[this->frame];

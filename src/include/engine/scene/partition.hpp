@@ -85,6 +85,7 @@ namespace OScene {
             }
 
             ~CullResultList(void) {
+                ASSERT(this->allocator != NULL, "Invalid allocator, cannot free.\n");
                 CullResult *i = this->begin;
                 while (i != NULL) {
                     CullResult *tmp = i;

@@ -2,7 +2,6 @@
 #define _ENGINE__CONCURRENCY__JOBS_HPP
 
 #include <atomic>
-#include <engine/concurrency/coroutine.hpp>
 #include <stddef.h>
 #include <stdint.h>
 #include <engine/utils.hpp>
@@ -33,9 +32,8 @@ namespace OJob {
             pthread_spinlock_t waitlistlock;
             pthread_spinlock_t lock;
 
-            void reference(OJob::Job *job) {
+            void reference(void) {
                 this->ref.fetch_add(1);
-                // init.push_back(job);
             }
             void unreference(void);
             void wait(void);
