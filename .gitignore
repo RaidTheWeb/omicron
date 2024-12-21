@@ -1,0 +1,11 @@
+rt/**
+**.o
+bin/**
+bin/
+build/**
+build/
+compile_commands.json
+**.plist
+**.plist.source
+**.cpp_clang-tidy**
+**.c_clang-tidy**
