@@ -203,6 +203,7 @@ namespace OVulkan {
         VkDeviceMemory memory;
         size_t offset;
         VkImageLayout state;
+        size_t layout;
         VmaAllocation allocation;
         size_t flags = 0;
     };
@@ -226,6 +227,14 @@ namespace OVulkan {
 
     struct renderpass {
         VkRenderPass renderpass;
+    };
+
+    struct fence {
+        VkFence fence;
+    };
+
+    struct semaphore {
+        VkSemaphore semaphore;
     };
 
     struct pipelinestate {
@@ -264,8 +273,7 @@ namespace OVulkan {
             VulkanStream *next; // For pooling.
 
             // For submission dependencies.
-            VulkanStream *waiton = NULL;
-            VulkanStream *signal = NULL;
+            std::vector<VulkanStream *> waiton;
 
             VkCommandBuffer cmd = VK_NULL_HANDLE;
             VkFence fence = VK_NULL_HANDLE;
@@ -277,9 +285,9 @@ namespace OVulkan {
 
             void flushcmd(void);
 
-            void setdependency(ORenderer::Stream *wait, ORenderer::Stream *signal) {
-                this->waiton = (VulkanStream *)wait;
-                this->signal = (VulkanStream *)signal;
+            void adddependency(ORenderer::Stream *wait) {
+                printf("adding %lx as a depend.\n", wait);
+                this->waiton.push_back((VulkanStream *)wait);
             }
 
             void setviewport(struct ORenderer::viewport viewport);
@@ -325,6 +333,10 @@ namespace OVulkan {
 
             uint64_t zonebegin(const char *name);
             void zoneend(uint64_t zone);
+
+            void marker(const char *name);
+
+            void wait(void);
 
             void begin(void);
             void end(void);
@@ -393,6 +405,8 @@ namespace OVulkan {
             std::unordered_map<size_t, VulkanResource<struct sampler>> samplers;
             std::unordered_map<size_t, VulkanResource<struct resourcesetlayout>> layouts;
             std::unordered_map<size_t, VulkanResource<struct resourceset>> sets;
+            std::unordered_map<size_t, VulkanResource<struct fence>> fences;
+            std::unordered_map<size_t, VulkanResource<struct semaphore>> semaphores;
             size_t resourcehandle = 0;
 
             ORenderer::ScratchBuffer scratchbuffers[RENDERER_MAXLATENCY];
@@ -457,6 +471,9 @@ namespace OVulkan {
 
             VulkanContext(struct ORenderer::init *init);
             ~VulkanContext(void);
+
+            uint8_t createfence(struct ORenderer::fence *fence);
+            uint8_t createsemaphore(struct ORenderer::semaphore *semaphore);
 
             // on any of these creates, if the handle is not already SIZE_MAX (invalid handle), we reuse the slot (to allow us to keep any reference to a resource valid)
             uint8_t createtexture(struct ORenderer::texturedesc *desc, struct ORenderer::texture *texture);
@@ -530,7 +547,7 @@ namespace OVulkan {
 
 
             void execute(GraphicsPipeline *pipeline, void *cam);
-            uint8_t createbackbuffer(struct ORenderer::renderpass pass, struct ORenderer::textureview *depth = NULL);
+            uint8_t createbackbuffer(struct ORenderer::renderpass pass, struct ORenderer::textureview *depth[RENDERER_MAXLATENCY] = NULL);
             void interpretstream(VkCommandBuffer cmd, ORenderer::Stream *stream);
             VkShaderModule createshadermodule(ORenderer::Shader shader);
             void createswapchainviews(void);

@@ -85,25 +85,30 @@ namespace OScene {
             return; \
         }
 
-#define COMPONENT_GETRESOLVER(...) \
+#define COMPONENT_GETCOMPONENT(...) \
+    OUtils::Handle<OScene::Component> getcomponent(uint32_t type) { \
         switch (type) { \
             __VA_ARGS__ \
             default: \
                 ASSERT(false, "An invalid component was requested of object.\n"); \
-        };
+        }; \
+        return (SCENE_INVALIDHANDLE)->gethandle<OScene::Component>(); \
+    }
 
 #define COMPONENT_GETRESOLUTION(TYPE, COMPONENT) \
-        case (TYPE): return (COMPONENT);
+    case (OUtils::STRINGID(TYPE)): return (COMPONENT);
 
 #define COMPONENT_HASRESOLVER(...) \
+    bool hascomponent(uint32_t type) { \
         switch (type) { \
             __VA_ARGS__ \
             default: \
                 return false; \
-        };
+        }; \
+    }
 
 #define COMPONENT_HASRESOLUTION(TYPE) \
-        case (TYPE): return true;
+    case (OUtils::STRINGID(TYPE)): return true;
 
     class Scene;
     class Component;
@@ -415,19 +420,15 @@ namespace OScene {
                 Component::destroy(this->light);
             }
 
-            bool hascomponent(uint32_t type) {
-                COMPONENT_HASRESOLVER(
-                    COMPONENT_HASRESOLUTION(OUtils::STRINGID("ModelInstance"));
-                    COMPONENT_HASRESOLUTION(OUtils::STRINGID("SpotLight"));
-                );
-            }
+            COMPONENT_HASRESOLVER(
+                COMPONENT_HASRESOLUTION("ModelInstance");
+                COMPONENT_HASRESOLUTION("SpotLight");
+            );
 
-            OUtils::Handle<Component> getcomponent(uint32_t type) {
-                COMPONENT_GETRESOLVER(
-                    COMPONENT_GETRESOLUTION(OUtils::STRINGID("ModelInstance"), this->model);
-                    COMPONENT_GETRESOLUTION(OUtils::STRINGID("SpotLight"), this->light);
-                );
-            }
+            COMPONENT_GETCOMPONENT(
+                COMPONENT_GETRESOLUTION("ModelInstance", this->model);
+                COMPONENT_GETRESOLUTION("SpotLight", this->light);
+            );
 
             void serialise(OResource::Serialiser *serialiser) {
                 this->model->serialise(serialiser);

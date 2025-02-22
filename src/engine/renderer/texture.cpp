@@ -1,8 +1,11 @@
 #include <engine/renderer/bindless.hpp>
 #include <engine/renderer/texture.hpp>
 #include <engine/resources/texture.hpp>
+#include <engine/utils/print.hpp>
 
 namespace ORenderer {
+
+    TextureManager texturemanager;
 
     Texture::Texture(OUtils::Handle<OResource::Resource> resource) {
         ZoneScoped;
@@ -32,7 +35,8 @@ namespace ORenderer {
             height <<= 1;
         }
 
-        printf("Maximum mip resolution within 64KiB budget: %lux%lu.\n", width, height);
+        OUtils::print("Maximum mip resolution within 64KiB budget: %lux%lu.\n", width, height);
+
         this->residentlevels = levels;
 
         struct texturedesc desc = { };
@@ -89,19 +93,19 @@ namespace ORenderer {
         stream->claim();
         stream->begin();
 
+        // Use pipeline barriers during the loop so when running this command buffer on the GPU the GPU can make use of mip levels *as* they're being uploaded.
+        stream->barrier(
+            this->texture, this->headers.header.format,
+            ORenderer::LAYOUT_UNDEFINED, ORenderer::LAYOUT_TRANSFERDST, // undefined -> transfer dst
+            ORenderer::PIPELINE_STAGETOP, ORenderer::PIPELINE_STAGETRANSFER, // top -> transfer
+            0, ORenderer::ACCESS_TRANSFERWRITE,
+            ORenderer::STREAM_IMMEDIATE, ORenderer::STREAM_IMMEDIATE//,
+            // j, 1 // from this mip to only this mip (this sort of system is useful so we can let existing pipelines continue to have access to other bits of memory while we're working on this)
+        ); // Barrier only applied on this mip level so that all other mips remain available
+
         offset = 0;
         size_t j = levels - 1;
         for (size_t i = 0; i < levels; i++) {
-            // Use pipeline barriers during the loop so when running this command buffer on the GPU the GPU can make use of mip levels *as* they're being uploaded.
-            stream->barrier(
-                this->texture, this->headers.header.format,
-                ORenderer::LAYOUT_UNDEFINED, ORenderer::LAYOUT_TRANSFERDST, // undefined -> transfer dst
-                ORenderer::PIPELINE_STAGETOP, ORenderer::PIPELINE_STAGETRANSFER, // top -> transfer
-                0, ORenderer::ACCESS_TRANSFERWRITE,
-                ORenderer::STREAM_IMMEDIATE, ORenderer::STREAM_IMMEDIATE,
-                j, 1 // from this mip to only this mip (this sort of system is useful so we can let existing pipelines continue to have access to other bits of memory while we're working on this)
-            ); // Barrier only applied on this mip level so that all other mips remain available
-
             struct ORenderer::bufferimagecopy region = { };
             region.offset = offset;
             region.rowlen = mw;
@@ -113,19 +117,20 @@ namespace ORenderer {
             region.baselayer = 0;
             region.layercount = this->headers.header.layercount;
             stream->copybufferimage(region, staging, this->texture);
-            stream->barrier(
-                this->texture, this->headers.header.format,
-                ORenderer::LAYOUT_TRANSFERDST, ORenderer::LAYOUT_SHADERRO, // Convert to shader read only
-                ORenderer::PIPELINE_STAGETRANSFER, ORenderer::PIPELINE_STAGEFRAGMENT,
-                ORenderer::ACCESS_TRANSFERWRITE, ORenderer::ACCESS_SHADERREAD | ORenderer::ACCESS_INPUTREAD,
-                ORenderer::STREAM_IMMEDIATE, ORenderer::STREAM_IMMEDIATE,
-                j, 1
-            );
             offset += this->headers.levels[i].size;
             mw <<= 1;
             mh <<= 1;
             j--;
         }
+
+        stream->barrier(
+            this->texture, this->headers.header.format,
+            ORenderer::LAYOUT_TRANSFERDST, ORenderer::LAYOUT_SHADERRO, // Convert to shader read only
+            ORenderer::PIPELINE_STAGETRANSFER, ORenderer::PIPELINE_STAGEFRAGMENT,
+            ORenderer::ACCESS_TRANSFERWRITE, ORenderer::ACCESS_SHADERREAD | ORenderer::ACCESS_INPUTREAD,
+            ORenderer::STREAM_IMMEDIATE, ORenderer::STREAM_IMMEDIATE//,
+            // j, 1
+        );
         stream->end();
         stream->release();
         context->submitstream(stream, true);
@@ -142,15 +147,17 @@ namespace ORenderer {
         struct texture texture;
         struct textureview textureview;
 
-        ORenderer::Stream *stream;
+        ORenderer::Stream *stream; // transfer stream
+        ORenderer::Stream *tomain; // transfer->graphics stream
+        ORenderer::Stream *totransfer; // graphics->transfer stream
     };
 
     static void deferreddestroy(OJob::Job *job) {
         struct work *work = (struct work *)job->param;
         while (context->frameid < work->deadline) { // So long as we haven't met the deadline, keep working.
-            OJob::yield(OJob::currentfibre, OJob::Job::STATUS_YIELD);
+            OJob::yield(OJob::currentfibre, OJob::Job::STATUS_YIELD); // this fucking sucks, actually (thinking cap on)
         }
-        printf("destroying!.\n");
+        OUtils::print("destroying!.\n");
 
         // Destroy all deferred work.
         context->destroybuffer(&work->staging);
@@ -159,6 +166,7 @@ namespace ORenderer {
         // Free the stream, this should actually be done differently!
         // Could probably just use a fence and wait on it. I should imagine it'd be easier to get the fence status and act like a critical section rather than a spinlock, because that'd take too long.
         // Problems could arise where we already go ahead and destroy that work before we update, i mean, if we deployed a number of update jobs within the span of a few frames that *could* happen, it's unlikely, but not impossible. Shouldn't ever be a concern though :D (i'll implement some checks just in case so i know it's what is causing a problem should it ever arise)
+        printf("freeing stream.\n");
         context->freestream(work->stream);
 
         // XXX: Handle this allocation better.
@@ -174,7 +182,8 @@ namespace ORenderer {
         }
 
         if (info.resolution > this->updateinfo.resolution) {
-            printf("Accepting request to upgrade resolution to %u.\n", info.resolution);
+            OUtils::print("Accepting request to upgrade resolution to %u.\n", info.resolution);
+            OUtils::print("working during frame %u.\n", context->getlatency());
             // Create and map a buffer for chunked uploading.
             struct buffer staging = { };
             // Allocate staging buffer the size of the highest mip level to be loaded in.
@@ -205,22 +214,24 @@ namespace ORenderer {
             totransfer->claim();
 
             // Wait on stream
-            tomain->setdependency(stream, NULL);
-            // Wait on nothing.
-            totransfer->setdependency(NULL, stream); // This one notifies the transfer queue stream when it's done.
+            tomain->adddependency(stream);
             // Wait on transfer.
-            stream->setdependency(totransfer, tomain); // We want to wait on the ownership transfer to the transfer queue, then signal the ownership transfer to the main queue when we're done.
+            stream->adddependency(totransfer); // We want to wait on the ownership transfer to the transfer queue, then signal the ownership transfer to the main queue when we're done.
 
             totransfer->begin();
+            totransfer->marker("begin ownership transfer from main to transfer");
             // Ownership release.
-            totransfer->barrier(this->texture, this->headers.header.format, ORenderer::LAYOUT_SHADERRO, ORenderer::LAYOUT_TRANSFERSRC, ORenderer::PIPELINE_STAGEFRAGMENT, ORenderer::PIPELINE_STAGEALL, ORenderer::ACCESS_SHADERREAD | ORenderer::ACCESS_INPUTREAD, 0, ORenderer::STREAM_FRAME, ORenderer::STREAM_TRANSFER);
+            totransfer->barrier(this->texture, this->headers.header.format, ORenderer::LAYOUT_SHADERRO, ORenderer::LAYOUT_TRANSFERSRC, ORenderer::PIPELINE_STAGEFRAGMENT, ORenderer::PIPELINE_STAGETRANSFER, ORenderer::ACCESS_SHADERREAD | ORenderer::ACCESS_INPUTREAD, ORenderer::ACCESS_TRANSFERREAD, ORenderer::STREAM_FRAME, ORenderer::STREAM_FRAME);
+
+            totransfer->barrier(this->texture, this->headers.header.format, ORenderer::LAYOUT_TRANSFERSRC, ORenderer::LAYOUT_TRANSFERSRC, ORenderer::PIPELINE_STAGETRANSFER, ORenderer::PIPELINE_STAGETRANSFER, ORenderer::ACCESS_TRANSFERREAD, ORenderer::ACCESS_TRANSFERREAD, ORenderer::STREAM_FRAME, ORenderer::STREAM_TRANSFER);
+            totransfer->marker("work done for main to transfer queue");
             totransfer->end();
             totransfer->release();
-            context->submitstream(totransfer);
 
             stream->begin();
+            stream->marker("acquire ownership");
             // Ownership acquire.
-            stream->barrier(this->texture, this->headers.header.format, ORenderer::LAYOUT_SHADERRO, ORenderer::LAYOUT_TRANSFERSRC, ORenderer::PIPELINE_STAGEALL, ORenderer::PIPELINE_STAGETRANSFER, 0, ORenderer::ACCESS_TRANSFERREAD, ORenderer::STREAM_FRAME, ORenderer::STREAM_TRANSFER);
+            stream->barrier(this->texture, this->headers.header.format, ORenderer::LAYOUT_TRANSFERSRC, ORenderer::LAYOUT_TRANSFERSRC, ORenderer::PIPELINE_STAGETRANSFER, ORenderer::PIPELINE_STAGETRANSFER, 0, ORenderer::ACCESS_TRANSFERREAD, ORenderer::STREAM_FRAME, ORenderer::STREAM_TRANSFER);
 
             struct texture texture = { };
             struct texturedesc desc = { };
@@ -236,7 +247,7 @@ namespace ORenderer {
                     (1 << ((0 - info.resolution) + this->headers.header.levelcount - 1))
                 )
             );
-            printf("updating to new resolution %lux%lu with level count of %u.\n", width, height, info.resolution + 1);
+            OUtils::print("frame %lu updating to new resolution %lux%lu with level count of %u.\n", ORenderer::context->frameid.load(), width, height, info.resolution + 1);
             desc.width = width;
             desc.height = height;
             desc.depth = this->headers.header.depth;
@@ -247,7 +258,9 @@ namespace ORenderer {
             desc.memlayout = MEMLAYOUT_OPTIMAL;
             desc.usage = USAGE_SAMPLED | USAGE_DST | USAGE_SRC;
             context->createtexture(&desc, &texture); // And allocate! Also: How do we destroy the old version without affecting existing in flight work? Perhaps dispatch a destroy on this resource after some frames of not being used?
-            context->setdebugname(texture, "Streamed");
+            char name[64];
+            snprintf(name, 64, "Streamed %lux%lu", width, height);
+            context->setdebugname(texture, name);
 
             struct textureview textureview = { };
             struct textureviewdesc viewdesc = { };
@@ -261,6 +274,7 @@ namespace ORenderer {
             viewdesc.type = this->headers.header.type;
             context->createtextureview(&viewdesc, &textureview); // This will replace our old texture view in due course.
 
+            stream->marker("newly created texture transfer to layout");
             // Transition to transfer layout.
             stream->barrier(
                 texture, this->headers.header.format,
@@ -269,6 +283,7 @@ namespace ORenderer {
                 0, ORenderer::ACCESS_TRANSFERWRITE,
                 ORenderer::STREAM_TRANSFER, ORenderer::STREAM_TRANSFER
             );
+            stream->marker("data copy");
 
             // Copy over old data to new data. On-GPU memory operation, doesn't incur bus bandwidth costs!
             for (size_t i = 0; i < this->updateinfo.resolution + 1; i++) { // For all existing resolutions.
@@ -291,6 +306,8 @@ namespace ORenderer {
                 region.extent = { mw, mh, this->headers.header.depth };
                 stream->copyimage(region, this->texture, texture, LAYOUT_TRANSFERSRC, LAYOUT_TRANSFERDST);
             }
+
+            stream->marker("finished data copy");
 
             // XXX: Somehow, between these points something takes ages!
 
@@ -322,66 +339,92 @@ namespace ORenderer {
                 // }
             } while (iterator < info.resolution + 1); // Use a do-while here so it runs at least once, we do requested + 1 here because otherwise it is NOT going to do all the work required of it and will early exit before the current working resolution is equal to the requested.
 
+            stream->marker("release ownership of both");
             // Release texture back to main queue.
             stream->barrier(
                 this->texture, this->headers.header.format,
-                ORenderer::LAYOUT_TRANSFERSRC, ORenderer::LAYOUT_SHADERRO,
-                ORenderer::PIPELINE_STAGETRANSFER, ORenderer::PIPELINE_STAGEALL,
+                ORenderer::LAYOUT_TRANSFERSRC, ORenderer::LAYOUT_TRANSFERSRC,
+                ORenderer::PIPELINE_STAGETRANSFER, ORenderer::PIPELINE_STAGETRANSFER,
                 ORenderer::ACCESS_TRANSFERREAD, 0,
                 ORenderer::STREAM_TRANSFER, ORenderer::STREAM_FRAME
             );
             // Release texture to main queue.
             stream->barrier(
                 texture, this->headers.header.format,
-                ORenderer::LAYOUT_TRANSFERDST, ORenderer::LAYOUT_SHADERRO,
-                ORenderer::PIPELINE_STAGETRANSFER, ORenderer::PIPELINE_STAGEALL,
+                ORenderer::LAYOUT_TRANSFERDST, ORenderer::LAYOUT_TRANSFERDST,
+                ORenderer::PIPELINE_STAGETRANSFER, ORenderer::PIPELINE_STAGETRANSFER,
                 ORenderer::ACCESS_TRANSFERWRITE, 0,
                 ORenderer::STREAM_TRANSFER, ORenderer::STREAM_FRAME
             );
             stream->end(); // Something better should be done about this, but it works for now. Ideally this'd be a critical section style lock, so we'll wait a little bit blocking before jumping over to a yield() loop so we don't need to do more. Waiting here is required as we must ensure all barrier work has been completed before changing what the texture points to CPU side to prevent out-of-order memory access.
             stream->release();
-            context->submitstream(stream, true);
+
+            OUtils::print("to main -> transfer back to normal for old textures at %ux%u.\n", desc.width, desc.height);
 
             tomain->begin();
+            tomain->marker("acquire on main queue");
             // Reacquire the texture on main queue so typical usage can continue.
             tomain->barrier(
                 this->texture, this->headers.header.format,
-                ORenderer::LAYOUT_TRANSFERSRC, ORenderer::LAYOUT_SHADERRO,
-                ORenderer::PIPELINE_STAGEALL, ORenderer::PIPELINE_STAGEFRAGMENT,
-                0, ORenderer::ACCESS_SHADERREAD | ORenderer::ACCESS_INPUTREAD,
+                ORenderer::LAYOUT_TRANSFERSRC, ORenderer::LAYOUT_TRANSFERSRC,
+                ORenderer::PIPELINE_STAGETRANSFER, ORenderer::PIPELINE_STAGETRANSFER,
+                0, ORenderer::ACCESS_TRANSFERREAD,
                 ORenderer::STREAM_TRANSFER, ORenderer::STREAM_FRAME
             );
             // Acquire the new texture and transition its layout in the process.
             tomain->barrier(
                 texture, this->headers.header.format,
-                ORenderer::LAYOUT_TRANSFERDST, ORenderer::LAYOUT_SHADERRO,
-                ORenderer::PIPELINE_STAGEALL, ORenderer::PIPELINE_STAGEFRAGMENT,
-                0, ORenderer::ACCESS_SHADERREAD | ORenderer::ACCESS_INPUTREAD,
+                ORenderer::LAYOUT_TRANSFERDST, ORenderer::LAYOUT_TRANSFERDST,
+                ORenderer::PIPELINE_STAGETRANSFER, ORenderer::PIPELINE_STAGETRANSFER,
+                0, ORenderer::ACCESS_TRANSFERWRITE,
                 ORenderer::STREAM_TRANSFER, ORenderer::STREAM_FRAME
             );
+
+            tomain->barrier(
+                this->texture, this->headers.header.format,
+                ORenderer::LAYOUT_TRANSFERSRC, ORenderer::LAYOUT_SHADERRO,
+                ORenderer::PIPELINE_STAGETRANSFER, ORenderer::PIPELINE_STAGEFRAGMENT,
+                ACCESS_TRANSFERREAD, ORenderer::ACCESS_SHADERREAD | ORenderer::ACCESS_INPUTREAD,
+                ORenderer::STREAM_FRAME, ORenderer::STREAM_FRAME
+            );
+            // Final layout change.
+            tomain->barrier(
+                texture, this->headers.header.format,
+                ORenderer::LAYOUT_TRANSFERDST, ORenderer::LAYOUT_SHADERRO, // this never happens?
+                ORenderer::PIPELINE_STAGETRANSFER, ORenderer::PIPELINE_STAGEFRAGMENT,
+                ACCESS_TRANSFERWRITE, ORenderer::ACCESS_SHADERREAD | ORenderer::ACCESS_INPUTREAD,
+                ORenderer::STREAM_FRAME, ORenderer::STREAM_FRAME
+            );
+            tomain->marker("completed all work!!!");
             tomain->end();
             tomain->release();
             // XXX: Implement locks that respect locking already on the current thread. What if something happens to the stream between now and submission?
-            context->submitstream(tomain, true); // Wait on this one, as its when the work is finished.
+            context->submitstream(totransfer); // pass access to transfer queue
+            context->submitstream(stream); // copy data to new texture before passing access back to graphics queue
+            context->submitstream(tomain); // Wait on this one, as its when the work is finished.
 
             // update everything!
             // Because we update it here on the CPU before we actually finish doing all the barrier work, it ends up using a version that doesn't yet have any barriers set up.
             setmanager.updatetexture(this->bindlessid, textureview);
-            context->freestream(stream);
+            OUtils::print("updated the hecking texture, what now?\n");
 
             struct work *destroy = (struct work *)malloc(sizeof(struct work)); // XXX: Guaranteed to be freed once no longer used.
             ASSERT(destroy != NULL, "Failed to allocate struct for deferred destroy work.\n");
-            destroy->deadline = context->frameid + 4; // Destroy when we can guarantee this is no longer being used.
+            destroy->deadline = context->frameid + TextureManager::EVICTDEADLINE; // Destroy when we can guarantee this is no longer being used.
             destroy->texture = this->texture;
             destroy->stream = stream;
+            destroy->tomain = tomain;
+            destroy->totransfer = totransfer;
             destroy->textureview = this->textureview;
             destroy->staging = staging; // Even though it was created in stack, it's just a handle, so we can pass it off here.
             OJob::Job *deferred = new OJob::Job(deferreddestroy, (uintptr_t)destroy);
-            deferred->priority = OJob::Job::PRIORITY_NORMAL; // XXX: LOW!
+            deferred->priority = OJob::Job::PRIORITY_NORMAL; // XXX: Implement LOW!
             OJob::kickjob(deferred);
 
+            texturemanager.activeoperations.push_back(tomain); // push the last (in order) stream to the texture manager's list, so that we can later use this information.
+
             // XXX: Destroy old one!
-            // Just dispatch a "deferred resource destroy" low priority job that'll loop and yield waiting for the frames in flight deadline to expire.
+            // Just dispatch a "deferred resource destroy" low priority job that'll loop and yield waiting for the frames in flight deadline to expire (by which time, we can reasonably assume there are no frames using this resource).
             this->texture = texture;
             this->textureview = textureview;
 
@@ -420,7 +463,7 @@ namespace ORenderer {
             desc.memlayout = MEMLAYOUT_OPTIMAL;
             desc.usage = USAGE_SAMPLED | USAGE_DST | USAGE_SRC;
             context->createtexture(&desc, &texture);
-            
+
             struct textureview textureview = { };
             struct textureviewdesc viewdesc = { };
             viewdesc.texture = texture;
@@ -442,7 +485,7 @@ namespace ORenderer {
                 size_t level = ((0 - i) + info.resolution);
                 size_t oldlevel = ((0 - i) + this->updateinfo.resolution);
 
-                printf("copying image from level %lu to new texture at res %lux%lu.\n", i, mw, mh);
+                OUtils::print("copying image from level %lu to new texture at res %lux%lu.\n", i, mw, mh);
 
                 stream->barrier(
                     texture, this->headers.header.format,
@@ -520,7 +563,7 @@ namespace ORenderer {
         ASSERT(newpath != NULL, "Failed to allocate memory for VFS path.\n");
         snprintf(newpath, len + 2, "%s*", resource->path);
         newpath[len + 2] = '\0';
-        printf("%s.\n", newpath);
+        OUtils::print("%s.\n", newpath);
 
         OUtils::Handle<OResource::Resource> ret = RESOURCE_INVALIDHANDLE;
         if ((ret = OResource::manager.get(newpath)) == RESOURCE_INVALIDHANDLE) {

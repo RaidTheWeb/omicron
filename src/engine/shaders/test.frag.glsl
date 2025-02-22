@@ -12,12 +12,21 @@ layout(location = 0) out vec4 f_outcolour;
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_EXT_nonuniform_qualifier : require
 
+struct SceneObject {
+    mat4 model;
+};
+
+layout(std430, buffer_reference) readonly buffer SceneBuffer {
+    SceneObject objects[];
+};
+
 layout(push_constant, scalar) uniform constants {
     uint samplerid;
     uint baseid;
     uint normalid;
     uint mrid;
-    mat4 model;
+    uint offset;
+    SceneBuffer scene;
     mat4 viewproj;
     vec3 pos;
 } pcs;

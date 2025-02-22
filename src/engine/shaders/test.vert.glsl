@@ -12,12 +12,21 @@
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_scalar_block_layout : require
 
+struct SceneObject {
+    mat4 model;
+};
+
+layout(std430, buffer_reference) readonly buffer SceneBuffer {
+    SceneObject objects[];
+};
+
 layout(push_constant, scalar) uniform constants {
     uint samplerid;
     uint baseid;
     uint normalid;
     uint mrid;
-    mat4 model;
+    uint offset;
+    SceneBuffer scene;
     mat4 viewproj;
     vec3 pos;
 } pcs;
@@ -34,15 +43,15 @@ layout(location = 4) out vec3 v_position;
 layout(location = 5) out vec3 v_normal;
 
 void main() {
-    gl_Position = pcs.viewproj * pcs.model * vec4(a_position, 1.0);
-    v_position = (pcs.model * vec4(a_position, 1.0)).xyz;
+    gl_Position = pcs.viewproj * pcs.scene.objects[pcs.offset].model * vec4(a_position, 1.0);
+    v_position = (pcs.scene.objects[pcs.offset].model * vec4(a_position, 1.0)).xyz;
     // gl_Position = vec4(a_position, 1.0);
     v_texcoord = a_texcoord;
     v_normal = a_normal;
     // v_tangent = a_tangent;
     // v_bitangent = a_bitangent;
-    // mat4 normal = transpose(inverse(pcs.model));
-    mat3 normal = transpose(inverse(mat3(pcs.model)));
+    // mat4 normal = transpose(inverse(pcs.scene.objects[pcs.offset].model));
+    mat3 normal = transpose(inverse(mat3(pcs.scene.objects[pcs.offset].model)));
     // vec3 T = normalize((normal * vec4(a_tangent, 0.0)).xyz);
     // vec3 N = normalize((normal * vec4(a_normal, 0.0)).xyz);
     vec3 T = normalize(normal * a_tangent);

@@ -37,11 +37,6 @@
 
 extern OScene::Scene scene;
 
-void testjob(OJob::Job *job) {
-    uint64_t *args = (uint64_t *)job->param;
-    ((OScene::Scene *)args[0])->partitionmanager.cull(*((ORenderer::PerspectiveCamera *)args[1]));
-}
-
 void callback(struct OResource::AsyncIO::work *work) {
     for (size_t i = 0; i < work->size; i++) {
         printf("%c", ((char *)work->buffer)[i]);
@@ -105,8 +100,7 @@ int main(int argc, const char **argv) {
     OResource::manager.create("out.otex");
     // OResource::manager.create("misc/test.otex");
 
-    ORenderer::TextureManager tmanager;
-    OUtils::Handle<OResource::Resource> tex = tmanager.create("misc/test.otex");
+    OUtils::Handle<OResource::Resource> tex = ORenderer::texturemanager.create("misc/test.otex");
     struct ORenderer::Texture::updateinfo info = { };
     info.timestamp = utils_getcounter();
     info.resolution = tex->as<ORenderer::Texture>()->headers.header.levelcount - 1;

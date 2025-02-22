@@ -1,0 +1,209 @@
+     g++ src/engine/renderer/pipeline/pipeline.cpp -std=gnu++17 -Isrc/include -Isrc/ -Ilibs/glm/ -Ilibs/KTX-Software/include -Ilibs/glfw/include -Ilibs/assimp/include -Ilibs/tracy/public/ -Ilibs/imgui -Ilibs/im3d -Lrt/ -DKHRONOS_STATIC -DOMICRON_VERSION=1 -DTRACY_ENABLE=1 -DTRACY_FIBERS -DOMICRON_RENDERVULKAN=1 -DOMICRON_RENDERBACKENDVULKAN=1 -g -DOMICRON_DEBUG=1
+     g++ bin/omicron                              -std=gnu++17 -Isrc/include -Isrc/ -Ilibs/glm/ -Ilibs/KTX-Software/include -Ilibs/glfw/include -Ilibs/assimp/include -Ilibs/tracy/public/ -Ilibs/imgui -Ilibs/im3d -Lrt/ -DKHRONOS_STATIC -DOMICRON_VERSION=1 -DTRACY_ENABLE=1 -DTRACY_FIBERS -DOMICRON_RENDERVULKAN=1 -DOMICRON_RENDERBACKENDVULKAN=1 -g -DOMICRON_DEBUG=1 -lm -lglfw3 -lktx -lktx_read -lassimp -lz -lX11 -lGL
+Job system initialised with 1 worker thread(s)
+supports enough extra queues.
+initial family 0.
+same family, different queues 1.
+0 initial 1 transfer
+'misc/test.otex'
+'misc/textures/spray_paint_bottles_nor_gl_4k.jpg'
+image misc/textures/spray_paint_bottles_nor_gl_4k.jpg of 4096x4096x3.
+'misc/textures/spray_paint_bottles_arm_4k.jpg'
+image misc/textures/spray_paint_bottles_arm_4k.jpg of 4096x4096x3.
+'misc/textures/spray_paint_bottles_dirty_diff_4k.jpg'
+image misc/textures/spray_paint_bottles_dirty_diff_4k.jpg of 4096x4096x3.
+'misc/textures/spray_paint_bottles_dirty_nor_gl_4k.jpg'
+image misc/textures/spray_paint_bottles_dirty_nor_gl_4k.jpg of 4096x4096x3.
+'misc/textures/spray_paint_bottles_dirty_arm_4k.jpg'
+image misc/textures/spray_paint_bottles_dirty_arm_4k.jpg of 4096x4096x3.
+bounds.
+done.
+Loading scene `saved.osce`.
+Number of terrains: 0
+Number of objects: 2049
+final usage metric: 81920.
+adding 60292de727a8 as a depend.
+adding 60292de78628 as a depend.
+1
+602931aa3a70 60292de78628
+1
+602931aa3ce0 60292de727a8
+adding 60292de78778 as a depend.
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xa5836f0000000754, name = Streamed 128x128, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xa5836f0000000754[Streamed 128x128] (subresource: aspectMask 0x1 array layer 0, mip level 0) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xa5836f0000000754, type: 10, name: Streamed 128x128
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xa5836f0000000754, name = Streamed 128x128, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xa5836f0000000754[Streamed 128x128] (subresource: aspectMask 0x1 array layer 0, mip level 1) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xa5836f0000000754, type: 10, name: Streamed 128x128
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xa5836f0000000754, name = Streamed 128x128, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xa5836f0000000754[Streamed 128x128] (subresource: aspectMask 0x1 array layer 0, mip level 2) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xa5836f0000000754, type: 10, name: Streamed 128x128
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xa5836f0000000754, name = Streamed 128x128, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xa5836f0000000754[Streamed 128x128] (subresource: aspectMask 0x1 array layer 0, mip level 3) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xa5836f0000000754, type: 10, name: Streamed 128x128
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xa5836f0000000754, name = Streamed 128x128, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xa5836f0000000754[Streamed 128x128] (subresource: aspectMask 0x1 array layer 0, mip level 4) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xa5836f0000000754, type: 10, name: Streamed 128x128
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xa5836f0000000754, name = Streamed 128x128, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xa5836f0000000754[Streamed 128x128] (subresource: aspectMask 0x1 array layer 0, mip level 5) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xa5836f0000000754, type: 10, name: Streamed 128x128
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xa5836f0000000754, name = Streamed 128x128, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xa5836f0000000754[Streamed 128x128] (subresource: aspectMask 0x1 array layer 0, mip level 6) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xa5836f0000000754, type: 10, name: Streamed 128x128
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xa5836f0000000754, name = Streamed 128x128, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xa5836f0000000754[Streamed 128x128] (subresource: aspectMask 0x1 array layer 0, mip level 7) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xa5836f0000000754, type: 10, name: Streamed 128x128
+final usage metric: 327680.
+adding 60292de728f8 as a depend.
+adding 60292de788c8 as a depend.
+1
+602931a5ca90 60292de788c8
+1
+602931a58b30 60292de728f8
+adding 60292de78a18 as a depend.
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xe5d4980000000772, name = Streamed 256x256, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xe5d4980000000772[Streamed 256x256] (subresource: aspectMask 0x1 array layer 0, mip level 0) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xe5d4980000000772, type: 10, name: Streamed 256x256
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xe5d4980000000772, name = Streamed 256x256, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xe5d4980000000772[Streamed 256x256] (subresource: aspectMask 0x1 array layer 0, mip level 1) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xe5d4980000000772, type: 10, name: Streamed 256x256
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xe5d4980000000772, name = Streamed 256x256, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xe5d4980000000772[Streamed 256x256] (subresource: aspectMask 0x1 array layer 0, mip level 2) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xe5d4980000000772, type: 10, name: Streamed 256x256
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xe5d4980000000772, name = Streamed 256x256, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xe5d4980000000772[Streamed 256x256] (subresource: aspectMask 0x1 array layer 0, mip level 3) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xe5d4980000000772, type: 10, name: Streamed 256x256
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xe5d4980000000772, name = Streamed 256x256, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xe5d4980000000772[Streamed 256x256] (subresource: aspectMask 0x1 array layer 0, mip level 4) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xe5d4980000000772, type: 10, name: Streamed 256x256
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xe5d4980000000772, name = Streamed 256x256, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xe5d4980000000772[Streamed 256x256] (subresource: aspectMask 0x1 array layer 0, mip level 5) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xe5d4980000000772, type: 10, name: Streamed 256x256
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xe5d4980000000772, name = Streamed 256x256, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xe5d4980000000772[Streamed 256x256] (subresource: aspectMask 0x1 array layer 0, mip level 6) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xe5d4980000000772, type: 10, name: Streamed 256x256
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xe5d4980000000772, name = Streamed 256x256, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xe5d4980000000772[Streamed 256x256] (subresource: aspectMask 0x1 array layer 0, mip level 7) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xe5d4980000000772, type: 10, name: Streamed 256x256
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xe5d4980000000772, name = Streamed 256x256, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xe5d4980000000772[Streamed 256x256] (subresource: aspectMask 0x1 array layer 0, mip level 8) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xe5d4980000000772, type: 10, name: Streamed 256x256
+freeing stream.
+final usage metric: 1310720.
+adding 60292de727a8 as a depend.
+adding 60292de78b68 as a depend.
+1
+602931977640 60292de78b68
+1
+602931977640 60292de727a8
+adding 60292de78cb8 as a depend.
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xcb49ad0000000794, name = Streamed 512x512, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xcb49ad0000000794[Streamed 512x512] (subresource: aspectMask 0x1 array layer 0, mip level 0) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xcb49ad0000000794, type: 10, name: Streamed 512x512
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xcb49ad0000000794, name = Streamed 512x512, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xcb49ad0000000794[Streamed 512x512] (subresource: aspectMask 0x1 array layer 0, mip level 1) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xcb49ad0000000794, type: 10, name: Streamed 512x512
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xcb49ad0000000794, name = Streamed 512x512, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xcb49ad0000000794[Streamed 512x512] (subresource: aspectMask 0x1 array layer 0, mip level 2) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xcb49ad0000000794, type: 10, name: Streamed 512x512
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xcb49ad0000000794, name = Streamed 512x512, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xcb49ad0000000794[Streamed 512x512] (subresource: aspectMask 0x1 array layer 0, mip level 3) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xcb49ad0000000794, type: 10, name: Streamed 512x512
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xcb49ad0000000794, name = Streamed 512x512, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xcb49ad0000000794[Streamed 512x512] (subresource: aspectMask 0x1 array layer 0, mip level 4) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xcb49ad0000000794, type: 10, name: Streamed 512x512
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xcb49ad0000000794, name = Streamed 512x512, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xcb49ad0000000794[Streamed 512x512] (subresource: aspectMask 0x1 array layer 0, mip level 5) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xcb49ad0000000794, type: 10, name: Streamed 512x512
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xcb49ad0000000794, name = Streamed 512x512, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xcb49ad0000000794[Streamed 512x512] (subresource: aspectMask 0x1 array layer 0, mip level 6) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xcb49ad0000000794, type: 10, name: Streamed 512x512
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xcb49ad0000000794, name = Streamed 512x512, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xcb49ad0000000794[Streamed 512x512] (subresource: aspectMask 0x1 array layer 0, mip level 7) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xcb49ad0000000794, type: 10, name: Streamed 512x512
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xcb49ad0000000794, name = Streamed 512x512, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xcb49ad0000000794[Streamed 512x512] (subresource: aspectMask 0x1 array layer 0, mip level 8) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xcb49ad0000000794, type: 10, name: Streamed 512x512
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0xcb49ad0000000794, name = Streamed 512x512, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0xcb49ad0000000794[Streamed 512x512] (subresource: aspectMask 0x1 array layer 0, mip level 9) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0xcb49ad0000000794, type: 10, name: Streamed 512x512
+freeing stream.
+final usage metric: 5242880.
+adding 60292de728f8 as a depend.
+adding 60292de78e08 as a depend.
+1
+602931a6ff70 60292de78e08
+1
+602931a6ff70 60292de728f8
+adding 60292de78f58 as a depend.
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x5b413e00000007b6, name = Streamed 1024x1024, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0x5b413e00000007b6[Streamed 1024x1024] (subresource: aspectMask 0x1 array layer 0, mip level 0) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0x5b413e00000007b6, type: 10, name: Streamed 1024x1024
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x5b413e00000007b6, name = Streamed 1024x1024, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0x5b413e00000007b6[Streamed 1024x1024] (subresource: aspectMask 0x1 array layer 0, mip level 1) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0x5b413e00000007b6, type: 10, name: Streamed 1024x1024
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x5b413e00000007b6, name = Streamed 1024x1024, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0x5b413e00000007b6[Streamed 1024x1024] (subresource: aspectMask 0x1 array layer 0, mip level 2) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0x5b413e00000007b6, type: 10, name: Streamed 1024x1024
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x5b413e00000007b6, name = Streamed 1024x1024, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0x5b413e00000007b6[Streamed 1024x1024] (subresource: aspectMask 0x1 array layer 0, mip level 3) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0x5b413e00000007b6, type: 10, name: Streamed 1024x1024
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x5b413e00000007b6, name = Streamed 1024x1024, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0x5b413e00000007b6[Streamed 1024x1024] (subresource: aspectMask 0x1 array layer 0, mip level 4) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0x5b413e00000007b6, type: 10, name: Streamed 1024x1024
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x5b413e00000007b6, name = Streamed 1024x1024, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0x5b413e00000007b6[Streamed 1024x1024] (subresource: aspectMask 0x1 array layer 0, mip level 5) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0x5b413e00000007b6, type: 10, name: Streamed 1024x1024
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x5b413e00000007b6, name = Streamed 1024x1024, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0x5b413e00000007b6[Streamed 1024x1024] (subresource: aspectMask 0x1 array layer 0, mip level 6) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0x5b413e00000007b6, type: 10, name: Streamed 1024x1024
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x5b413e00000007b6, name = Streamed 1024x1024, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0x5b413e00000007b6[Streamed 1024x1024] (subresource: aspectMask 0x1 array layer 0, mip level 7) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0x5b413e00000007b6, type: 10, name: Streamed 1024x1024
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x5b413e00000007b6, name = Streamed 1024x1024, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0x5b413e00000007b6[Streamed 1024x1024] (subresource: aspectMask 0x1 array layer 0, mip level 8) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0x5b413e00000007b6, type: 10, name: Streamed 1024x1024
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x5b413e00000007b6, name = Streamed 1024x1024, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0x5b413e00000007b6[Streamed 1024x1024] (subresource: aspectMask 0x1 array layer 0, mip level 9) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0x5b413e00000007b6, type: 10, name: Streamed 1024x1024
+UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout(ERROR / SPEC): msgNum: 1303270965 - Validation Error: [ UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout ] Object 0: handle = 0x60292e6373c0, name = Frame 1 Command Buffer, type = VK_OBJECT_TYPE_COMMAND_BUFFER; Object 1: handle = 0x5b413e00000007b6, name = Streamed 1024x1024, type = VK_OBJECT_TYPE_IMAGE; | MessageID = 0x4dae5635 | vkCmdDraw():  command buffer VkCommandBuffer 0x60292e6373c0[Frame 1 Command Buffer] expects VkImage 0x5b413e00000007b6[Streamed 1024x1024] (subresource: aspectMask 0x1 array layer 0, mip level 10) to be in layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL--instead, current layout is VK_IMAGE_LAYOUT_UNDEFINED.
+    Objects: 2
+        [0] 0x60292e6373c0, type: 6, name: Frame 1 Command Buffer
+        [1] 0x5b413e00000007b6, type: 10, name: Streamed 1024x1024

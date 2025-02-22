@@ -211,7 +211,7 @@ namespace OScene {
     }
 
     static void cullworker(OJob::Job *job) {
-        printf("cull worker.\n");
+        // printf("cull worker.\n");
         struct ParitionManager::work *work = (struct ParitionManager::work *)job->param;
         ParitionManager *manager = work->manager;
         CullResultList *list = work->list;
@@ -262,13 +262,11 @@ namespace OScene {
         if (!this->map.size()) {
             return NULL;
         }
-        OMath::Frustum frustum = camera.getfrustum();
 
         CullResultList list = CullResultList(&this->allocator);
         std::atomic<size_t> workeridx = 0; // Index into cell map list, atomic so only one worker is working on a cell at any one time.
 
-
-        struct work work = { .idx = &workeridx, .list = &list, .frustum = &frustum, .manager = this };
+        struct work work = { .idx = &workeridx, .list = &list, .frustum = &camera.getfrustum(), .manager = this };
         OJob::Counter *counter = new OJob::Counter();
         for (size_t i = 0; i < this->cells.size() / OJob::numworkers; i++) { // Distribute work across the number of workers (not an exact science, only a best case average so that we have a possibility of all the work happening properly distributed).
             OJob::Job *job = new OJob::Job(cullworker, (uintptr_t)&work);
@@ -277,7 +275,6 @@ namespace OScene {
         }
 
 
-        // printf("pre wait.\n");
         counter->wait();
         delete counter;
 

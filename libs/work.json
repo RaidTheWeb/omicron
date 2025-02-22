@@ -1,0 +1,36 @@
+[
+    {
+        "name": "GLFW",
+        "path": "glfw",
+        "instructions": [
+            "cmake -S . -B . -D BUILD_SHARED_LIBS=OFF",
+            "make -j"
+        ],
+        "binaries": [
+            "src/libglfw3.a"
+        ]
+    },
+    {
+        "name": "Assimp",
+        "path": "assimp",
+        "instructions": [
+            "cmake -S . -B . -D BUILD_SHARED_LIBS=OFF",
+            "make -j"
+        ],
+        "binaries": [
+            "lib/libassimp.a"
+        ]
+    },
+    {
+        "name": "KTX Software",
+        "path": "KTX-Software",
+        "instructions": [
+            "cmake -S . -B . -D BUILD_SHARED_LIBS=OFF",
+            "make -j"
+        ],
+        "binaries": [
+            "libktx.a",
+            "libktx_read.a"
+        ]
+    }
+]

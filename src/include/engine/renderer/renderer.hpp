@@ -833,6 +833,16 @@ namespace ORenderer {
         size_t handle = RENDERER_INVALIDHANDLE;
     };
 
+    // GPU sync
+    struct semaphore {
+        size_t handle = RENDERER_INVALIDHANDLE;
+    };
+
+    // CPU sync
+    struct fence {
+        size_t handle = RENDERER_INVALIDHANDLE;
+    };
+
     struct samplerbind {
         struct sampler sampler;
         size_t layout;
@@ -894,6 +904,11 @@ namespace ORenderer {
 
             RendererContext(struct init *init) { };
             virtual ~RendererContext(void) { };
+
+            // Create fence.
+            virtual uint8_t createfence(struct fence *fence) { return RESULT_SUCCESS; }
+            // Create semaphore.
+            virtual uint8_t createsemaphore(struct semaphore *semaphore) { return RESULT_SUCCESS; }
 
             // Create a texture.
             virtual uint8_t createtexture(struct texturedesc *desc, struct texture *texture) { return RESULT_SUCCESS; }
@@ -1061,7 +1076,7 @@ namespace ORenderer {
             }
 
             // Create the renderer backbuffer(s).
-            virtual uint8_t createbackbuffer(struct renderpass pass, struct ORenderer::textureview *depth = NULL) { return RESULT_SUCCESS; }
+            virtual uint8_t createbackbuffer(struct renderpass pass, struct ORenderer::textureview *depth[RENDERER_MAXLATENCY] = NULL) { return RESULT_SUCCESS; }
             // Request a reference to the backbuffer of the current frame.
             virtual uint8_t requestbackbuffer(struct framebuffer *framebuffer) { return RESULT_SUCCESS; }
             virtual uint8_t requestbackbuffertexture(struct texture *texture) { return RESULT_SUCCESS; }
@@ -1363,7 +1378,7 @@ namespace ORenderer {
             }
 
             // Depend on another stream's completion, while triggering another.
-            virtual void setdependency(Stream *wait, Stream *signal) { }
+            virtual void adddependency(Stream *wait) { }
 
             virtual void setviewport(struct viewport viewport) { }
 
@@ -1581,6 +1596,12 @@ namespace ORenderer {
             virtual void zoneend(uint64_t zone) {
                 // this->cmd.push_back((struct streamnibble) { .type = OP_DEBUGZONEEND, .zoneend = zone });
             }
+
+            virtual void marker(const char *name) {
+
+            }
+
+            virtual void wait(void) { }
 
             virtual void begin(void) { }
             virtual void end(void) { }

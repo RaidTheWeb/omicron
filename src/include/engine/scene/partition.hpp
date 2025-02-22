@@ -78,7 +78,6 @@ namespace OScene {
             CullResult *end = NULL;
             // OJob::Mutex mutex;
             OJob::Spinlock spin;
-            uint64_t previous = 0;
 
             CullResultList(OUtils::PoolAllocator *allocator) {
                 this->allocator = allocator;
@@ -97,7 +96,6 @@ namespace OScene {
             // Detach results list from this handler.
             CullResult *detach(void) {
                 CullResult *tmp = this->begin;
-                this->previous = 0;
                 this->begin = NULL;
                 this->end = NULL;
                 return tmp;
@@ -118,8 +116,6 @@ namespace OScene {
                     res->header.next = NULL;
                     this->end = res; // Set this allocation as the new end of the list
                 }
-                ASSERT((uint64_t)res != previous, "Reallocating the same pointer with %p.\n", res);
-                previous = (uint64_t)res;
                 // this->mutex.unlock();
                 return res;
             }

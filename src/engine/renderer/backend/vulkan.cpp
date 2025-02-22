@@ -598,6 +598,51 @@ namespace OVulkan {
         return ORenderer::RESULT_SUCCESS;
     }
 
+    uint8_t VulkanContext::createfence(struct ORenderer::fence *fence) {
+        ASSERT(fence != NULL, "Fence must not be NULL.\n");
+        VkFenceCreateInfo info = { };
+        info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        info.pNext = NULL;
+        info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+        if (fence->handle == RENDERER_INVALIDHANDLE) {
+            this->resourcemutex.lock();
+            fence->handle = this->resourcehandle++;
+            this->fences[fence->handle].vkresource = (struct fence) { };
+            this->resourcemutex.unlock();
+        }
+        this->resourcemutex.lock();
+        struct fence *vkfence = &this->fences[fence->handle].vkresource;
+
+        VkResult res = vkCreateFence(this->dev, &info, NULL, &vkfence->fence);
+        this->resourcemutex.unlock();
+
+        return ORenderer::RESULT_SUCCESS;
+    }
+
+    uint8_t VulkanContext::createsemaphore(struct ORenderer::semaphore *semaphore) {
+        ASSERT(semaphore != NULL, "Semaphore must not be NULL.\n");
+        VkSemaphoreCreateInfo info = { };
+        info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        info.pNext = NULL;
+        info.flags = 0;
+
+        if (semaphore->handle == RENDERER_INVALIDHANDLE) {
+            this->resourcemutex.lock();
+            semaphore->handle = this->resourcehandle++;
+            this->semaphores[semaphore->handle].vkresource = (struct semaphore) { };
+            this->resourcemutex.unlock();
+        }
+        this->resourcemutex.lock();
+        struct semaphore *vksemaphore = &this->semaphores[semaphore->handle].vkresource;
+
+        VkResult res = vkCreateSemaphore(this->dev, &info, NULL, &vksemaphore->semaphore);
+        this->resourcemutex.unlock();
+
+        return ORenderer::RESULT_SUCCESS;
+
+    }
+
     uint8_t VulkanContext::createtexture(struct ORenderer::texturedesc *desc, struct ORenderer::texture *texture) {
         ASSERT(desc != NULL, "Description must not be NULL.\n");
         ASSERT(texture != NULL, "Texture must not be NULL.\n");
@@ -1655,17 +1700,30 @@ namespace OVulkan {
         submit.commandBufferCount = 1;
         submit.pCommandBuffers = &vkstream->cmd;
 
-        if (vkstream->waiton != NULL) {
+
+        VkPipelineStageFlags stagemask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT; // XXX: Better specifics.
+        VkSemaphore *semaphores = NULL;
+        VkPipelineStageFlags *stages = NULL;
+        if (vkstream->waiton.size() > 0) {
             // Wait on this one.
-            submit.waitSemaphoreCount = 1;
-            submit.pWaitSemaphores = &vkstream->waiton->semaphore;
+            submit.waitSemaphoreCount = vkstream->waiton.size();
+            printf("%u\n", submit.waitSemaphoreCount);
+            semaphores = (VkSemaphore *)malloc(sizeof(VkSemaphore) * submit.waitSemaphoreCount);
+            ASSERT(semaphores != NULL, "Failed to allocate memory for queue wait semaphores.\n");
+            stages = (VkPipelineStageFlags *)malloc(sizeof(VkPipelineStageFlags) * submit.waitSemaphoreCount);
+            ASSERT(semaphores != NULL, "Failed to allocate memory for queue wait stages.\n");
+            for (size_t i = 0; i < submit.waitSemaphoreCount; i++) {
+                printf("%lx %lx\n", semaphores, vkstream->waiton[i]);
+                semaphores[i] = vkstream->waiton[i]->semaphore;
+                stages[i] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+            }
+            submit.pWaitSemaphores = semaphores;
             // This'll mean we wait for the semaphore to trigger before even beginning to do any work.
-            VkPipelineStageFlags stagemask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT; // XXX: Better specifics.
-            submit.pWaitDstStageMask = &stagemask;
+            submit.pWaitDstStageMask = stages;
         }
 
         submit.signalSemaphoreCount = 1;
-        submit.pSignalSemaphores = &vkstream->semaphore; // Trigger our own semaphore.
+        submit.pSignalSemaphores = &vkstream->semaphore; // Trigger our own semaphore (this is so that later on, other streams can reference this semaphore to await our completion).
 
         VkResult res = vkQueueSubmit(
             vkstream->type == ORenderer::STREAM_COMPUTE ? this->asynccompute :
@@ -1674,10 +1732,17 @@ namespace OVulkan {
             1, &submit, wait ? vkstream->fence : VK_NULL_HANDLE);
         ASSERT(res == VK_SUCCESS, "Failed to submit Vulkan queue %d.\n", res);
 
+        if (semaphores != NULL) {
+            free(semaphores);
+            free(stages);
+        }
+
         if (wait) {
             vkWaitForFences(this->dev, 1, &vkstream->fence, VK_TRUE, UINT64_MAX);
             vkResetFences(this->dev, 1, &vkstream->fence);
         }
+
+        vkstream->waiton.clear(); // clear dependencies on submission.
 
         stream->release();
         return ORenderer::RESULT_SUCCESS;
@@ -1694,6 +1759,11 @@ namespace OVulkan {
         } else {
             ASSERT(false, "Invalid stream type %u requested.\n", type);
         }
+    }
+
+    void VulkanStream::wait(void) {
+        vkWaitForFences(this->context->dev, 1, &this->fence, VK_TRUE, UINT64_MAX);
+        vkResetFences(this->context->dev, 1, &this->fence);
     }
 
     void VulkanContext::freestream(ORenderer::Stream *stream) {
@@ -1729,6 +1799,18 @@ namespace OVulkan {
 #ifdef OMICRON_DEBUG
         tracy::VkCtxScope *ctx = (tracy::VkCtxScope *)zone;
         ctx->~VkCtxScope();
+#endif
+    }
+
+    void VulkanStream::marker(const char *name) {
+#ifdef OMICRON_DEBUG
+        VkDebugUtilsLabelEXT label = { };
+        label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+        label.pNext = NULL;
+        label.pLabelName = name;
+        glm::vec4 colour = glm::vec4(0.0, 0.0, 0.0, 1.0);
+        memcpy(label.color, &colour, sizeof(glm::vec4));
+        vkCmdInsertDebugUtilsLabelEXT(this->cmd, &label);
 #endif
     }
 
@@ -1892,7 +1974,8 @@ namespace OVulkan {
     void VulkanStream::barrier(struct ORenderer::texture texture, size_t format, size_t oldlayout, size_t newlayout, size_t srcstage, size_t dststage, size_t srcaccess, size_t dstaccess, uint8_t srcqueue, uint8_t dstqueue, size_t basemip, size_t mipcount, size_t baselayer, size_t layercount) {
         ZoneScoped;
         struct texture *vktexture = &this->context->textures[texture.handle].vkresource;
-        OVulkan::barrier(this->cmd, vktexture, format, oldlayout, newlayout, srcstage, dststage, srcaccess, dstaccess, srcqueue, dstqueue, basemip, mipcount, baselayer, layercount);
+        OVulkan::barrier(this->cmd, vktexture, format, oldlayout != ORenderer::LAYOUT_COUNT ? oldlayout : vktexture->layout, newlayout, srcstage, dststage, srcaccess, dstaccess, srcqueue, dstqueue, basemip, mipcount, baselayer, layercount);
+        vktexture->layout = newlayout;
     }
 
     void VulkanStream::copybufferimage(struct ORenderer::bufferimagecopy region, struct ORenderer::buffer buffer, struct ORenderer::texture texture, size_t layout) {
@@ -2115,9 +2198,8 @@ namespace OVulkan {
         }
     }
 
-    uint8_t VulkanContext::createbackbuffer(struct ORenderer::renderpass pass, struct ORenderer::textureview *depth) {
+    uint8_t VulkanContext::createbackbuffer(struct ORenderer::renderpass pass, struct ORenderer::textureview *depth[RENDERER_MAXLATENCY]) {
         ASSERT(pass.handle != RENDERER_INVALIDHANDLE, "Invalid renderpass.\n");
-        ASSERT(depth == NULL || depth->handle != RENDERER_INVALIDHANDLE, "Invalid depth texture view.\n");
 
         this->swapfbpass = pass;
 
@@ -2130,7 +2212,7 @@ namespace OVulkan {
             fbdesc.pass = pass; // XXX: How do we setup the renderpass for the backbuffer?
             struct ORenderer::textureview attachments[] = {
                 this->swaptextureviews[i],
-                depth != NULL ? *depth :
+                depth[i % RENDERER_MAXLATENCY] != NULL ? *depth[i % RENDERER_MAXLATENCY] :
                     (struct ORenderer::textureview) { RENDERER_INVALIDHANDLE }
             };
             fbdesc.attachments = attachments;
@@ -2266,7 +2348,12 @@ namespace OVulkan {
         info.pApplicationName = "Don't know actually";
         info.applicationVersion = VK_MAKE_VERSION(1, 0, 0); // config
         info.pEngineName = "Omicron Engine";
-        info.engineVersion = VK_MAKE_VERSION(OMICRON_VERSION, 0, 0);
+        uint32_t major = 0;
+        uint32_t minor = 0;
+        uint32_t revision = 0;
+        int sres = sscanf(OMICRON_VERSION, "%u.%u.%u", &major, &minor, &revision);
+        ASSERT(sres == 3, "Invalid version string during compilation.\n"); // If the result is anything other than three, the version string did not match the format string.
+        info.engineVersion = VK_MAKE_VERSION(major, minor, revision); // assemble version out of components.
         info.apiVersion = apiversion;
 
         const char *extensions[sizeof(OVulkan::extensions) / sizeof(OVulkan::extensions[0])]; // purely string representation of vulkan device extensions
@@ -2282,11 +2369,12 @@ namespace OVulkan {
 
         VkValidationFeaturesEXT vinfo = { };
         vinfo.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
-        static const VkValidationFeatureEnableEXT enable_features[2] = {
+        static const VkValidationFeatureEnableEXT enable_features[3] = {
             VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
             VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
+            VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT
         };
-        vinfo.enabledValidationFeatureCount = 2;
+        vinfo.enabledValidationFeatureCount = 3;
         vinfo.pEnabledValidationFeatures = enable_features;
 
         VkInstanceCreateInfo instancecreate = { };
@@ -2492,6 +2580,9 @@ namespace OVulkan {
                     computefamily = i; // Set up our async compute family anyway.
                 }
             } else if ((props->queueFlags & VK_QUEUE_TRANSFER_BIT)) {
+                if (separatecomputeasync) {
+                    continue;
+                }
                 // We found a transfer queue.
                 transferfamily = i;
                 uniquetransfer = true;
@@ -2531,37 +2622,39 @@ namespace OVulkan {
         queueinfo.flags = 0;
         queuecreate.push_back(queueinfo);
 
-        if (uniquetransfer) {
+        if (separatecomputeasync) { // compute and async are separated, and the are async
+            if (computefamily == transferfamily) {
+                queueinfo.queueCount = 2;
+                queueinfo.queueFamilyIndex = computefamily;
+                if (presentfamily == transferfamily) {
+                    queueinfo.queueCount = 3;
+                }
+                queuecreate.push_back(queueinfo);
+            }
+        } else if (asyncqueues) { // async queues, but they share
             queueinfo.queueCount = 1;
             queueinfo.queueFamilyIndex = transferfamily;
             queuecreate.push_back(queueinfo);
-        }
+        } else {
+            if (uniquecompute) {
+                queueinfo.queueCount = 1;
+                queueinfo.queueFamilyIndex = computefamily;
+                queuecreate.push_back(queueinfo);
+            }
 
-        if (uniquecompute) {
-            queueinfo.queueCount = 1;
-            queueinfo.queueFamilyIndex = computefamily;
-            queuecreate.push_back(queueinfo);
-        }
+            if (uniquetransfer) {
+                queueinfo.queueCount = 1;
+                queueinfo.queueFamilyIndex = transferfamily;
+                queuecreate.push_back(queueinfo);
+            }
 
+        }
         if (uniquepresent) {
             queueinfo.queueCount = 1;
             queueinfo.queueFamilyIndex = presentfamily;
             queuecreate.push_back(queueinfo);
         }
 
-        if (asyncqueues) {
-            if (separatecomputeasync) {
-                if (presentseparate) {
-                    queueinfo.queueCount = 3;
-                } else {
-                    queueinfo.queueCount = 2;
-                }
-            } else {
-                queueinfo.queueCount = 1;
-            }
-            queueinfo.queueFamilyIndex = transferfamily; // doesn't matter which one here because they'll both end up pointing to the same thing.
-            queuecreate.push_back(queueinfo);
-        }
 
         // float queueprio[3] = { 1.0f, 1.0f, 1.0f };
         // VkDeviceQueueCreateInfo queuecreate[3];
@@ -2588,14 +2681,11 @@ namespace OVulkan {
 
         VkDeviceCreateInfo devicecreate = { };
         devicecreate.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        printf("sizeof %lu.\n", sizeof(VkPhysicalDeviceFeatures));
         devicecreate.pNext = &bda; // Pass on extra enabled features.
         devicecreate.pQueueCreateInfos = queuecreate.data();
         devicecreate.queueCreateInfoCount = queuecreate.size();
         devicecreate.pEnabledFeatures = &this->phyfeatures;
         devicecreate.enabledExtensionCount = sizeof(devextensions) / sizeof(devextensions[0]);
-        printf("extensions: %u.\n", devicecreate.enabledExtensionCount);
-
 
         const char *devextensions[sizeof(OVulkan::devextensions) / sizeof(OVulkan::devextensions[0])]; // purely string representation of vulkan device extensions
         for (size_t i = 0; i < sizeof(OVulkan::devextensions) / sizeof(OVulkan::devextensions[0]); i++) {
@@ -2646,6 +2736,13 @@ namespace OVulkan {
         this->presentfamily = presentfamily;
         vkGetDeviceQueue(this->dev, initialfamily, 0, &this->graphicsqueue);
         vkGetDeviceQueue(this->dev, initialfamily, 0, &this->computequeue);
+        VkDebugUtilsObjectNameInfoEXT nameinfo = { };
+        nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+        nameinfo.pNext = NULL;
+        nameinfo.objectType = VK_OBJECT_TYPE_QUEUE;
+        nameinfo.objectHandle = (uint64_t)this->graphicsqueue;
+        nameinfo.pObjectName = "Graphics / Compute Queue";
+        vkSetDebugUtilsObjectNameEXT(this->dev, &nameinfo);
         if (presentseparate) {
             // Present separate on the last one.
             vkGetDeviceQueue(this->dev, presentfamily, 2, &this->presentqueue);
@@ -2659,10 +2756,19 @@ namespace OVulkan {
             vkGetDeviceQueue(this->dev, presentfamily, 0, &this->presentqueue);
         }
 
+        if (!presentoninitial) {
+            nameinfo.objectHandle = (uint64_t)this->presentqueue;
+            nameinfo.pObjectName = "Present Queue";
+          vkSetDebugUtilsObjectNameEXT(this->dev, &nameinfo);
+        }
+
         if (separatecomputeasync) { // Separate queues.
             this->asyncqueues = true;
             vkGetDeviceQueue(this->dev, computefamily, 0, &this->asynccompute);
             vkGetDeviceQueue(this->dev, transferfamily, 1, &this->asynctransfer);
+            nameinfo.objectHandle = (uint64_t)this->asynctransfer;
+            nameinfo.pObjectName = "Transfer Queue";
+            vkSetDebugUtilsObjectNameEXT(this->dev, &nameinfo);
         } else if (uniquecompute) { // One for compute.
             vkGetDeviceQueue(this->dev, computefamily, 0, &this->asynccompute);
             this->asyncqueues = true;
@@ -2680,6 +2786,8 @@ namespace OVulkan {
             this->computefamily  = initialfamily;
             this->transferfamily = initialfamily;
         }
+
+        printf("%u initial %u transfer\n", this->initialfamily, this->transferfamily);
 
         uint32_t formatcount = 0;
         vkGetPhysicalDeviceSurfaceFormatsKHR(this->phy, this->surface, &formatcount, NULL);
@@ -2718,7 +2826,15 @@ namespace OVulkan {
         res = vkAllocateCommandBuffers(this->dev, &cmdalloc, this->cmd);
         ASSERT(res == VK_SUCCESS, "Failed to allocate Vulkan command buffer %d.\n", res);
 
+        nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+        nameinfo.pNext = NULL;
+        nameinfo.objectType = VK_OBJECT_TYPE_COMMAND_BUFFER;
         for (size_t i = 0; i < RENDERER_MAXLATENCY; i++) {
+            char name[64];
+            nameinfo.objectHandle = (uint64_t)this->cmd[i];
+            snprintf(name, 64, "Frame %lu Command Buffer", i);
+            nameinfo.pObjectName = name;
+            vkSetDebugUtilsObjectNameEXT(this->dev, &nameinfo);
             this->stream[i].cmd = this->cmd[i]; // Give the streams a handle to our command buffer. We can now reference it both through the stream and through this->cmd.
             this->stream[i].type = ORenderer::STREAM_FRAME;
             this->stream[i].context = this;
@@ -2842,9 +2958,22 @@ namespace OVulkan {
             nameinfo.pObjectName = name;
             vkSetDebugUtilsObjectNameEXT(this->context->dev, &nameinfo);
             ASSERT(vkCreateSemaphore(ctx->dev, &seminfo, NULL, &this->semaphores[i]) == VK_SUCCESS, "Failed to create Vulkan semaphore!\n");
+            nameinfo.objectType = VK_OBJECT_TYPE_SEMAPHORE;
+            nameinfo.objectHandle = (uint64_t)this->semaphores[i];
+            snprintf(name, 64, "Pool Semaphore %lu", i);
+            nameinfo.pObjectName = name;
+            vkSetDebugUtilsObjectNameEXT(this->context->dev, &nameinfo);
         }
 
+        VkDebugUtilsObjectNameInfoEXT nameinfo = { };
+        nameinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+        nameinfo.pNext = NULL;
+        nameinfo.objectType = VK_OBJECT_TYPE_COMMAND_BUFFER;
+
         for (size_t i = 0; i < VULKAN_POOLSIZE - 1; i++) {
+            nameinfo.pObjectName = "Transfer Command Buffer";
+            nameinfo.objectHandle = (uint64_t)this->transfercmds[i];
+            vkSetDebugUtilsObjectNameEXT(this->context->dev, &nameinfo);
             this->transferpool[i].cmd = this->transfercmds[i];
             this->transferpool[i].context = ctx;
             this->transferpool[i].type = ORenderer::STREAM_TRANSFER;
@@ -2852,6 +2981,9 @@ namespace OVulkan {
             this->transferpool[i].fence = this->fences[i];
             this->transferpool[i].semaphore = this->semaphores[i];
 
+            nameinfo.pObjectName = "Compute Command Buffer";
+            nameinfo.objectHandle = (uint64_t)this->computecmds[i];
+            vkSetDebugUtilsObjectNameEXT(this->context->dev, &nameinfo);
             this->computepool[i].cmd = this->computecmds[i];
             this->computepool[i].context = ctx;
             this->computepool[i].type = ORenderer::STREAM_COMPUTE;
@@ -2859,6 +2991,9 @@ namespace OVulkan {
             this->computepool[i].fence = this->fences[i + VULKAN_POOLSIZE];
             this->computepool[i].semaphore = this->semaphores[i + VULKAN_POOLSIZE];
 
+            nameinfo.pObjectName = "Immediate Command Buffer";
+            nameinfo.objectHandle = (uint64_t)this->imcmds[i];
+            vkSetDebugUtilsObjectNameEXT(this->context->dev, &nameinfo);
             this->impool[i].cmd = this->imcmds[i];
             this->impool[i].context = ctx;
             this->impool[i].type = ORenderer::STREAM_IMMEDIATE;
@@ -2966,14 +3101,27 @@ namespace OVulkan {
         VkSubmitInfo submit = { };
         submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-        VkSemaphore waitsems[] = { this->imagepresent[this->frame] };
-        VkPipelineStageFlags waitstages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT }; // wait for output stage by waiting on imagepresent semaphore, execute the stage when triggered
-        submit.waitSemaphoreCount = 1;
+        VkSemaphore *waitsems = (VkSemaphore *)malloc(sizeof(VkSemaphore) * (1 + this->stream[this->frame].waiton.size()));
+        VkPipelineStageFlags *waitstages = (VkPipelineStageFlags *)malloc(sizeof(VkPipelineStageFlags) * (1 + this->stream[this->frame].waiton.size()));
+        ASSERT(waitsems != NULL, "Failed to allocate memory for wait semaphores.\n");
+        ASSERT(waitstages != NULL, "Failed to allocate memory for wait stages.\n");
+
+        waitsems[0] = this->imagepresent[this->frame];
+        waitstages[0] = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+        for (size_t i = 0; i < this->stream[this->frame].waiton.size(); i++) {
+            waitsems[i + 1] = this->stream[this->frame].waiton[i]->semaphore;
+            waitstages[i + 1] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        }
+
+        submit.waitSemaphoreCount = 1 + this->stream[this->frame].waiton.size();
         submit.pWaitSemaphores = waitsems;
         submit.pWaitDstStageMask = waitstages;
         submit.commandBufferCount = 1;
         // submit.pCommandBuffers = &this->cmd[this->frame];
         submit.pCommandBuffers = &this->stream[this->frame].cmd;
+
+        this->stream[this->frame].waiton.clear();
 
         VkSemaphore signalsems[] = { this->renderdone[this->frame] };
         submit.signalSemaphoreCount = 1;
@@ -2981,6 +3129,9 @@ namespace OVulkan {
 
         res = vkQueueSubmit(this->graphicsqueue, 1, &submit, this->framesinflight[this->frame]); // do all this and trigger the frameinflight fence to we know we can go ahead and render the next frame when we're done with the command buffers
         ASSERT(res == VK_SUCCESS, "Failed to submit Vulkan queue %d.\n", res);
+
+        free(waitsems);
+        free(waitstages);
 
         VkPresentInfoKHR presentinfo = { };
         presentinfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;

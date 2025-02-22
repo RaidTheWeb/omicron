@@ -15,6 +15,7 @@ misc/
 **.so
 **.so.**
 **.o
+**.a
 **.glb
 **.obj
 **.mtl

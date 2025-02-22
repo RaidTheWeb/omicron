@@ -152,7 +152,7 @@ namespace ORenderer {
                 return this->invviewproj;
             }
 
-            OMath::Frustum getfrustum(void) {
+            OMath::Frustum &getfrustum(void) {
                 this->update();
                 return this->frustum;
             }

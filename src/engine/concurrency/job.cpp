@@ -288,6 +288,7 @@ namespace OJob {
             }
 
             if (fibre->yieldstatus == OJob::Job::STATUS_YIELD) {
+                // this was pretty evil of me. this is being pushed back and yet isn't finished?
                 OJob::queues[decl->priority].push(decl); // Push the job to the back of the queue, the idea being that it'll only be picked back up later.
             }
 

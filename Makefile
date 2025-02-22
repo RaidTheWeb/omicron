@@ -1,84 +1,82 @@
+
 #
-#	Game Makefile
+# Generic Make
 #
 
-OUT = omicron
-VERSION = 1
 SOURCE_DIR = src
 BIN_DIR = bin
 BUILD_DIR = build
 CC = gcc
 CXX = g++
-CFLAGS = -std=gnu++17 -I$(SOURCE_DIR)/include -I$(SOURCE_DIR)/ \
-		 -Ilibs/glm/ \
-		 -Ilibs/KTX-Software/include \
-		 -Ilibs/glfw/include \
-		 -Ilibs/assimp/include \
-		 -Ilibs/tracy/public/ \
-		 -Ilibs/imgui \
-		 -Ilibs/im3d \
-		 -Lrt/ \
-		 -DOMICRON_VERSION=$(VERSION)
-		 # -Llibs/meshoptimizer/build \
+CFLAGS = -std=gnu++17 -I$(SOURCE_DIR)/include -I$(SOURCE_DIR)/
+DEBUG_CFLAGS =
+PROD_CFLAGS = -O2
+LDFLAGS =
 
-# bgfx needs to be compiled with the shared library copied to /usr/lib (or whatever else is the main path for libraries)
-LDFLAGS = -lglfw \
-		  -lktx \
-		  -lktx_read \
-		  -lassimp \
-		  -lz \
-		  -lX11 \
-		  -lGL \
-		  -lm \
+#
+# Project Specific
+#
 
-
+# Binary output filename
+OUT = omicron
 DEBUG ?= 1
+# Project flags
+CFLAGS +=
+DEBUG_CFLAGS +=
+PROD_CFLAGS +=
+LDFLAGS +=
+
+#
+# Engine Specific
+#
+
+# Engine version
+VERSION = 0.0.1
+# Engine flags
+CFLAGS += -DOMICRON_VERSION=\"$(VERSION)\" \
+		  -Ilibs/glm \
+		  -Ilibs/KTX-Software/include \
+		  -Ilibs/glfw/include \
+		  -Ilibs/assimp/include \
+		  -Ilibs/tracy/public \
+		  -Ilibs/imgui \
+		  -Lrt/ \
+		  -DKHRONOS_STATIC
+DEBUG_CFLAGS += -g -DOMICRON_DEBUG=1 -DTRACY_ENABLE=1 -DTRACY_FIBERS
+PROD_CFLAGS +=
+LDFLAGS += -lm -lz \
+		   -lglfw3 \
+		   -lktx \
+		   -lktx_read \
+		   -lassimp \
+		   -lX11 \
+		   -lGL
+
+#
+# Actual work
+#
 
 HEADERS = $(shell find $(SOURCE_DIR)/include -type f -name '*.hpp')
 SOURCES = $(shell find $(SOURCE_DIR) -type f -name '*.cpp') libs/imgui/imgui.cpp libs/imgui/imgui_draw.cpp libs/imgui/imgui_tables.cpp libs/imgui/imgui_widgets.cpp libs/tracy/public/TracyClient.cpp
-
-ifeq ($(strip $(DEBUG)), 1)
-	CFLAGS += -DTRACY_ENABLE=1 -DTRACY_FIBERS
-endif
-SHADERS = $(shell find $(SOURCE_DIR)/engine/shaders -type f -name '*.glsl')
-OSHADERS = $(SHADERS:.glsl=.spv)
 OBJECTS = $(SOURCES:.cpp=.o)
 
-OMICRON_RENDERBACKEND ?= vulkan
-ifeq ($(strip $(OMICRON_RENDERBACKEND)), vulkan)
-	CFLAGS += -DOMICRON_RENDERVULKAN=1 -DOMICRON_RENDERBACKENDVULKAN=1
-else ifeq ($(strip $(OMICRON_RENDERBACKEND)), opengl)
-	CFLAGS += -DOMICRON_RENDEROPENGL=1
-endif
-
 ifeq ($(strip $(DEBUG)), 1)
-	CFLAGS += -g -DOMICRON_DEBUG=1
+	CFLAGS += $(DEBUG_CFLAGS)
 else
-	CFLAGS += -O2
+	CFLAGS += $(PROD_CFLAGS)
 endif
 
 .PHONY: clean utils
 
-all: utils shaders $(BIN_DIR)/$(OUT)
+all: utils libs $(BIN_DIR)/$(OUT)
 
-shaders: $(OSHADERS)
+libs/libsbuilt: # making this rule here so that we will attempt to create this file with the python script.
+	@cd libs/ && python3 buildlibs.py
 
-run: $(OSHADERS) $(BIN_DIR)/$(OUT)
-	@bash run.sh
+libs: libs/libsbuilt
 
-utils: utils/rpak utils/otex
-
-utils/rpak: utils/rpak.c
-	@echo "Compiling utils/rpak"
-	@$(CC) -o utils/rpak utils/rpak.c -lz
-
-utils/otex: utils/otex.c
-	@echo "Compiling utils/otex"
-	@$(CC) -o utils/otex utils/otex.c -lktx -lktx_read -Lrt -Ilibs/KTX-Software/include
-
-%.spv: %.glsl
-	@printf "Compiling GLSL shader %s to Vulkan SPIRV\n" $^
-	@glslc -g -I src/engine/shaders -fshader-stage=$(shell python3 src/engine/shaders/getshaderstage.py $^) -o $@ $^
+run: libs $(BIN_DIR)/$(OUT)
+	@./$(BIN_DIR)/$(OUT)
 
 $(BIN_DIR)/$(OUT): $(OBJECTS)
 	@printf "%8s %-40s %s %s\n" $(CXX) $@ "$(CFLAGS)" "$(LDFLAGS)"
@@ -97,8 +95,7 @@ $(BIN_DIR)/$(OUT): $(OBJECTS)
 	@$(CXX) -c $(CFLAGS) -o $@ $<
 
 clean:
-	rm -r bin
-	# rm -r build
-	rm -r $(OBJECTS)
-	rm utils/rpak
-	rm utils/otex
+	rm -rf bin
+	rm -rf build
+	rm -rf $(OBJECTS)
+

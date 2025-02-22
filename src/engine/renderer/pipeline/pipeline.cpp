@@ -16,8 +16,8 @@ struct ORenderer::buffer idxbuffer;
 struct ORenderer::buffer ubo;
 struct ORenderer::texture tex = { };
 struct ORenderer::textureview texview = { };
-struct ORenderer::texture depthtex = { };
-struct ORenderer::textureview depthtexview = { };
+struct ORenderer::texture depthtex[RENDERER_MAXLATENCY] = { };
+struct ORenderer::textureview depthtexview[RENDERER_MAXLATENCY] = { };
 struct ORenderer::buffermap ubomap = { };
 struct ORenderer::texture outtex = { };
 struct ORenderer::textureview outtexview = { };
@@ -32,7 +32,8 @@ struct ubo {
     uint32_t base;
     uint32_t normal;
     uint32_t mrid;
-    glm::mat4 model;
+    uint32_t offset;
+    uint64_t scenebuffer;
     glm::mat4 viewproj;
     glm::vec3 campos;
 };
@@ -248,16 +249,27 @@ void PBRPipeline::init(void) {
     ASSERT(ORenderer::context->createpipelinestate(&desc, &state) == ORenderer::RESULT_SUCCESS, "Failed to create pipeline state.\n");
 
     ASSERT(ORenderer::context->createtexture(
-        &depthtex, ORenderer::IMAGETYPE_2D, 1280, 720, 1, 1, 1,
+        &depthtex[0], ORenderer::IMAGETYPE_2D, 1280, 720, 1, 1, 1,
         ORenderer::FORMAT_D32F, ORenderer::MEMLAYOUT_OPTIMAL,
         ORenderer::USAGE_DEPTHSTENCIL, ORenderer::SAMPLE_X1
     ) == ORenderer::RESULT_SUCCESS, "Failed to create depth texture.\n");
+    ORenderer::context->createtexture(
+        &depthtex[1], ORenderer::IMAGETYPE_2D, 1280, 720, 1, 1, 1,
+        ORenderer::FORMAT_D32F, ORenderer::MEMLAYOUT_OPTIMAL,
+        ORenderer::USAGE_DEPTHSTENCIL, ORenderer::SAMPLE_X1
+    );
 
-    ASSERT(ORenderer::context->createtextureview(
-        &depthtexview, ORenderer::FORMAT_D32F, depthtex,
+    ORenderer::context->createtextureview(
+        &depthtexview[0], ORenderer::FORMAT_D32F, depthtex[0],
         ORenderer::IMAGETYPE_2D, ORenderer::ASPECT_DEPTH,
         0, 1, 0, 1
-    ) == ORenderer::RESULT_SUCCESS, "Failed to create depth texture view.\n");
+    );
+
+    ORenderer::context->createtextureview(
+        &depthtexview[1], ORenderer::FORMAT_D32F, depthtex[1],
+        ORenderer::IMAGETYPE_2D, ORenderer::ASPECT_DEPTH,
+        0, 1, 0, 1
+    );
 
     ASSERT(ORenderer::context->createbuffer(
         &ubo, sizeof(struct ubo), ORenderer::BUFFER_UNIFORM,
@@ -267,7 +279,8 @@ void PBRPipeline::init(void) {
 
     ASSERT(ORenderer::context->mapbuffer(&ubomap, ubo, 0, sizeof(struct ubo)) == ORenderer::RESULT_SUCCESS, "Failed to map uniform buffer.\n");
 
-    ORenderer::context->createbackbuffer(rpass, &depthtexview);
+    ORenderer::textureview *depthviews[RENDERER_MAXLATENCY] = { &depthtexview[0], &depthtexview[1] };
+    ORenderer::context->createbackbuffer(rpass, depthviews);
     renderrect.width = engine_engine->winsize.x;
     renderrect.height = engine_engine->winsize.y;
 
@@ -306,17 +319,27 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
 
     // printf("start of work.\n");
     OUtils::Handle<OResource::Resource> tex = OResource::manager.get("misc/test.otex*");
-    if (res < tex->as<ORenderer::Texture>()->headers.header.levelcount && !(frame % 16)) {
+    if (res < tex->as<ORenderer::Texture>()->headers.header.levelcount) {
         struct ORenderer::Texture::updateinfo info = { };
         info.timestamp = utils_getcounter();
         info.resolution = res;
-        // tex->as<ORenderer::Texture>()->meetresolution(info);
-        // if (frame > 6) {
-            // exit(1);
-        // }
-        res++;
+        tex->as<ORenderer::Texture>()->meetresolution(info);
+        if (res >= tex->as<ORenderer::Texture>()->headers.header.levelcount) {
+            if (frame > 14) {
+            } else {
+                // res--;
+            }
+        } else {
+            res++;
+        }
     }
     frame++;
+
+    if (ORenderer::texturemanager.activeoperations.size() > 0) {
+        printf("add depends.\n");
+        stream->adddependency(ORenderer::texturemanager.activeoperations[0]);
+        ORenderer::texturemanager.activeoperations.clear();
+    }
 
     struct ORenderer::clearcolourdesc colourdesc = { };
     colourdesc.count = 2;
@@ -333,6 +356,9 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
 
     stream->claim();
     stream->begin();
+    struct ORenderer::Texture *rtex = tex->as<ORenderer::Texture>();
+    stream->barrier(rtex->texture, rtex->headers.header.format, ORenderer::LAYOUT_COUNT, ORenderer::LAYOUT_SHADERRO, ORenderer::PIPELINE_STAGETOP, ORenderer::PIPELINE_STAGEFRAGMENT, 0, ORenderer::ACCESS_INPUTREAD | ORenderer::ACCESS_SHADERREAD, ORenderer::STREAM_FRAME, ORenderer::STREAM_FRAME);
+
     // size_t zone = stream->zonebegin("Object Render");
     stream->beginrenderpass(rpass, fb, (struct ORenderer::rect) { .x = 0, .y = 0, .width = renderrect.width, .height = renderrect.height }, colourdesc);
     struct ORenderer::viewport viewport = { .x = 0, .y = 0, .width = (float)renderrect.width, .height = (float)renderrect.height, .mindepth = 0.0f, .maxdepth = 1.0f };
@@ -376,6 +402,9 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
     size_t totalobjects = scene.objects.size();
     size_t visibleobjects = 0;
     ORenderer::ScratchBuffer *scratchbuffer = ORenderer::context->requestscratchbuffer();
+    char name[64];
+    snprintf(name, 64, "work time! %lu", ORenderer::context->frameid.load());
+    stream->marker(name);
     // printf("done cull.\n");
     if (res != NULL) {
         ZoneScopedN("Object Render");
@@ -390,7 +419,6 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
                     OUtils::Handle<OScene::ModelInstance> model = obj->getcomponent(OUtils::STRINGID("ModelInstance"))->gethandle<OScene::ModelInstance>();
 
                     model->model->claim(); // XXX: Claim access.
-
                     const float time = glfwGetTime();
 
                     for (size_t i = 0; i < model->model->as<ORenderer::Model>()->meshes.size(); i++) {
@@ -400,7 +428,10 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
                         data.base = 1;
                         data.normal = model->model->as<ORenderer::Model>()->meshes[i].material.normal.gpuid;
                         data.mrid = model->model->as<ORenderer::Model>()->meshes[i].material.mr.gpuid;
-                        data.model = obj->getglobalmatrix();
+                        // data.model = obj->getglobalmatrix();
+                        glm::mat4 modelmtx = obj->getglobalmatrix();
+                        data.offset = scratchbuffer->write(&modelmtx, sizeof(glm::mat4)) / sizeof(glm::mat4);
+                        data.scenebuffer = ORenderer::context->getbufferref(scratchbuffer->buffer, 0);
                         data.viewproj = camera->getviewproj(); // precalculated combination (so we don't have to do this calculation per fragment, this could be extendedll by precalculating the mvp)
                         data.campos = camera->pos;
 

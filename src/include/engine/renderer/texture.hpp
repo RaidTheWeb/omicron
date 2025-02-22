@@ -46,9 +46,8 @@ namespace ORenderer {
         public:
             // Texture streaming as described in 28/05/24
 
-            // Eviction deadline of 60ms.
             // XXX: Deadline in frames instead? Using a deadline of x frames is a lot friendlier.
-            static const uint64_t EVICTDEADLINE = 1000000 * 60; // Deadline for time that needs to elapse after the last reference to a texture before it is unloaded (ns).
+            static const uint64_t EVICTDEADLINE = 4; // Deadline for frames that needs to elapse after the last reference to a texture before it is unloaded.
             static const uint64_t PERMANENTRESIDENCY = 64 * 1024; // 64KiB per-texture level permanent residency budget. NOTE: Permanent does not mean it stays forever, it'll just stay for as long as it is actually used (ie. loaded models have a reference to it).
 
             // create texture handle empty and let it persist, only load up the data when needed.
@@ -58,12 +57,16 @@ namespace ORenderer {
             // Memory budget available to texture streaming. 0 is debug for DO NOT TRACK.
             size_t memorybudget = 0;
 
+            std::vector<Stream *> activeoperations;
+
             // Create managed texture from path (loads first mip level to GPU).
             OUtils::Handle<OResource::Resource> create(const char *path);
             OUtils::Handle<OResource::Resource> create(OUtils::Handle<OResource::Resource> resource);
 
 
     };
+
+    extern TextureManager texturemanager;
 }
 
 #endif
