@@ -13,7 +13,7 @@
 [submodule "libs/tracy"]
 	path = libs/tracy
     url = https://github.com/wolfpld/tracy
-    branch = v0.10
+    branch = v0.11.1
 [submodule "libs/im3d"]
 	path = libs/im3d
 	url = https://github.com/john-chapman/im3d

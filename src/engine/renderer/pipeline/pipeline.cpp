@@ -308,6 +308,7 @@ OScene::Scene scene;
 
 size_t frame = 0;
 size_t res = 0;
+bool backwardsnow = false;
 void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
     ZoneScopedN("Pipeline Execute");
     int64_t now = utils_getcounter();
@@ -319,20 +320,28 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
 
     // printf("start of work.\n");
     OUtils::Handle<OResource::Resource> tex = OResource::manager.get("misc/test.otex*");
-    if (res < tex->as<ORenderer::Texture>()->headers.header.levelcount) {
-        struct ORenderer::Texture::updateinfo info = { };
-        info.timestamp = utils_getcounter();
-        info.resolution = res;
-        tex->as<ORenderer::Texture>()->meetresolution(info);
-        if (res >= tex->as<ORenderer::Texture>()->headers.header.levelcount) {
-            if (frame > 14) {
-            } else {
-                // res--;
+    printf("%u < %u\n", res, tex->as<ORenderer::Texture>()->headers.header.levelcount);
+    if (res == tex->as<ORenderer::Texture>()->headers.header.levelcount - 1) {
+        backwardsnow = true;
+    }
+    printf("before update %lu.\n", res);
+    if (res >= 0 && frame % 4 && frame > 400) {
+        if (backwardsnow && res > 0) {
+            if (frame > 500) {
+                res--;
             }
         } else {
+
             res++;
         }
     }
+
+    struct ORenderer::Texture::updateinfo info = { };
+    info.timestamp = utils_getcounter();
+    info.resolution = res;
+    printf("moving to %u\n", res);
+    tex->as<ORenderer::Texture>()->meetresolution(info);
+skip:
     frame++;
 
     if (ORenderer::texturemanager.activeoperations.size() > 0) {

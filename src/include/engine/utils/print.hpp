@@ -7,7 +7,7 @@
 namespace OUtils {
 
 static inline void print(const char *fmt, ...) {
-#ifndef OMICRON_DEBUG
+#ifdef OMICRON_DEBUG
     va_list args;
     va_start(args, fmt);
     vprintf(fmt, args);

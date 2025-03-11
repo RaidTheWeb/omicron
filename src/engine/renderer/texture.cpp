@@ -146,6 +146,7 @@ namespace ORenderer {
         struct buffer staging;
         struct texture texture;
         struct textureview textureview;
+        bool upgrade;
 
         ORenderer::Stream *stream; // transfer stream
         ORenderer::Stream *tomain; // transfer->graphics stream
@@ -159,18 +160,27 @@ namespace ORenderer {
         }
         OUtils::print("destroying!.\n");
 
-        // Destroy all deferred work.
-        context->destroybuffer(&work->staging);
-        context->destroytexture(&work->texture);
-        context->destroytextureview(&work->textureview);
-        // Free the stream, this should actually be done differently!
-        // Could probably just use a fence and wait on it. I should imagine it'd be easier to get the fence status and act like a critical section rather than a spinlock, because that'd take too long.
-        // Problems could arise where we already go ahead and destroy that work before we update, i mean, if we deployed a number of update jobs within the span of a few frames that *could* happen, it's unlikely, but not impossible. Shouldn't ever be a concern though :D (i'll implement some checks just in case so i know it's what is causing a problem should it ever arise)
-        printf("freeing stream.\n");
-        context->freestream(work->stream);
+        if (work->upgrade) {
+            // Destroy all deferred work.
+            context->destroybuffer(&work->staging);
+            context->destroytexture(&work->texture);
+            context->destroytextureview(&work->textureview);
+            // Free the stream, this should actually be done differently!
+            // Could probably just use a fence and wait on it. I should imagine it'd be easier to get the fence status and act like a critical section rather than a spinlock, because that'd take too long.
+            // Problems could arise where we already go ahead and destroy that work before we update, i mean, if we deployed a number of update jobs within the span of a few frames that *could* happen, it's unlikely, but not impossible. Shouldn't ever be a concern though :D (i'll implement some checks just in case so i know it's what is causing a problem should it ever arise)
+            printf("freeing stream.\n");
+            context->freestream(work->stream);
+            context->freestream(work->tomain);
+            context->freestream(work->totransfer);
 
-        // XXX: Handle this allocation better.
-        free(work);
+            // XXX: Handle this allocation better.
+            free(work);
+        } else {
+            context->destroytexture(&work->texture);
+            context->destroytextureview(&work->textureview);
+            context->freestream(work->stream);
+            free(work);
+        }
     }
 
     void Texture::meetresolution(struct updateinfo info) {
@@ -416,6 +426,7 @@ namespace ORenderer {
             destroy->tomain = tomain;
             destroy->totransfer = totransfer;
             destroy->textureview = this->textureview;
+            destroy->upgrade = true; // this is from a resolution upgrade.
             destroy->staging = staging; // Even though it was created in stack, it's just a handle, so we can pass it off here.
             OJob::Job *deferred = new OJob::Job(deferreddestroy, (uintptr_t)destroy);
             deferred->priority = OJob::Job::PRIORITY_NORMAL; // XXX: Implement LOW!
@@ -545,6 +556,19 @@ namespace ORenderer {
             context->submitstream(stream, true);
 
             setmanager.updatetexture(this->bindlessid, textureview);
+            struct work *destroy = (struct work *)malloc(sizeof(struct work));
+            ASSERT(destroy != NULL, "Failed to allocate struct for deferred destroy work.\n");
+            destroy->deadline = context->frameid + TextureManager::EVICTDEADLINE;
+            destroy->texture = this->texture;
+            destroy->stream = stream;
+            destroy->textureview = this->textureview;
+            destroy->upgrade = false; // this is from a resolution downgrade.
+            OJob::Job *deferred = new OJob::Job(deferreddestroy, (uintptr_t)destroy);
+            deferred->priority = OJob::Job::PRIORITY_NORMAL; // XXX: Implement LOW!
+            OJob::kickjob(deferred);
+
+            texturemanager.activeoperations.push_back(stream);
+
             this->texture = texture;
             this->textureview = textureview;
         } else {
