@@ -91,6 +91,8 @@ namespace OJob {
             size_t id = 0;
             void (*entry)(OJob::Job *job) = NULL;
             uintptr_t param = 0;
+            bool returns = false;
+            void *returnvalue = NULL;
 
             Job(void (*entry)(OJob::Job *job), uintptr_t param) {
                 this->entry = entry;

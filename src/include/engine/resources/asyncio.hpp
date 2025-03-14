@@ -15,7 +15,7 @@ namespace OResource {
                 FAILED
             };
 
-            class Ticket {
+            class Promise {
                 public:
                     OJob::Counter *counter;
 
@@ -97,7 +97,7 @@ namespace OResource {
                 *buffer = work.buffer;
             }
 
-            static Ticket load(OUtils::Handle<Resource> resource, void **buffer, size_t offset, size_t size, uint8_t *error = NULL) {
+            static Promise load(OUtils::Handle<Resource> resource, void **buffer, size_t offset, size_t size, uint8_t *error = NULL) {
                 ASSERT(buffer != NULL, "No buffer for output data provided.\n");
                 ASSERT(size > 0, "Buffer cannot have the size 0.\n");
 
@@ -109,14 +109,14 @@ namespace OResource {
                 work->offset = offset;
                 work->error = error;
 
-                Ticket ticket = Ticket();
-                ticket.counter = new OJob::Counter();
+                Promise promise = Promise();
+                promise.counter = new OJob::Counter();
 
                 OJob::Job *job = new OJob::Job(loadwrapper, (uintptr_t)work);
-                job->counter = ticket.counter;
+                job->counter = promise.counter;
                 OJob::kickjob(job);
 
-                return ticket;
+                return promise;
             }
 
             // Request a file to be loaded and calls a callback when done, buffer for data is allocated automatically for the callback (Non-blocking).
@@ -139,7 +139,7 @@ namespace OResource {
                 loadwait(manager.get(path), buffer, offset, size, error);
             }
 
-            static Ticket load(const char *path, void **buffer, size_t offset, size_t size, uint8_t *error) {
+            static Promise load(const char *path, void **buffer, size_t offset, size_t size, uint8_t *error) {
                 return load(manager.get(path), buffer, offset, size, error);
             }
 

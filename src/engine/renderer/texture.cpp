@@ -432,7 +432,9 @@ namespace ORenderer {
             deferred->priority = OJob::Job::PRIORITY_NORMAL; // XXX: Implement LOW!
             OJob::kickjob(deferred);
 
+            texturemanager.operationsmutex.lock();
             texturemanager.activeoperations.push_back(tomain); // push the last (in order) stream to the texture manager's list, so that we can later use this information.
+            texturemanager.operationsmutex.unlock();
 
             // XXX: Destroy old one!
             // Just dispatch a "deferred resource destroy" low priority job that'll loop and yield waiting for the frames in flight deadline to expire (by which time, we can reasonably assume there are no frames using this resource).
@@ -567,7 +569,9 @@ namespace ORenderer {
             deferred->priority = OJob::Job::PRIORITY_NORMAL; // XXX: Implement LOW!
             OJob::kickjob(deferred);
 
+            texturemanager.operationsmutex.lock();
             texturemanager.activeoperations.push_back(stream);
+            texturemanager.operationsmutex.unlock();
 
             this->texture = texture;
             this->textureview = textureview;
@@ -587,7 +591,6 @@ namespace ORenderer {
         ASSERT(newpath != NULL, "Failed to allocate memory for VFS path.\n");
         snprintf(newpath, len + 2, "%s*", resource->path);
         newpath[len + 2] = '\0';
-        OUtils::print("%s.\n", newpath);
 
         OUtils::Handle<OResource::Resource> ret = RESOURCE_INVALIDHANDLE;
         if ((ret = OResource::manager.get(newpath)) == RESOURCE_INVALIDHANDLE) {
@@ -596,7 +599,7 @@ namespace ORenderer {
             resource->release();
             return ret;
         } else {
-            free(newpath);
+            free(newpath); // we can free the allocation here, because it never needs to be given to the resource.
             resource->release();
             return ret; // Texture already exists, silently continue on as always.
         }

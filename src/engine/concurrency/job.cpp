@@ -224,7 +224,9 @@ namespace OJob {
 
             job->allgood.store(true);
             // XXX: Stack smashing here?
-            delete job; // Early delete job before yielding.
+            if (!job->returns) { // only delete the job if it returns, otherwise, we can return it later.
+                delete job; // Early delete job before yielding.
+            }
 
             OJob::yield(fibre, Job::STATUS_DONE); // yield to scheduler marking job as done
         }
@@ -381,7 +383,6 @@ namespace OJob {
 #ifdef __linux__
         numworkers = sysconf(_SC_NPROCESSORS_ONLN);
 #endif
-        numworkers = 1;
 
         printf("Job system initialised with %lu worker thread(s)\n", numworkers);
 

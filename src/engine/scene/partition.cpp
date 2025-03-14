@@ -174,7 +174,6 @@ namespace OScene {
         while (cell != NULL) { // Iterate over all cells in the chain.
             for (size_t i = 0; i < cell->header.count; i++) {
                 if (!(cell->objects[i]->flags & GameObject::typeflags::IS_CULLABLE)) {
-                    printf("not cullable.\n");
                     continue;
                 }
 
@@ -211,25 +210,27 @@ namespace OScene {
     }
 
     static void cullworker(OJob::Job *job) {
+        ZoneScoped;
         // printf("cull worker.\n");
         struct ParitionManager::work *work = (struct ParitionManager::work *)job->param;
         ParitionManager *manager = work->manager;
-        CullResultList *list = work->list;
+        // CullResultList *list = work->list;
+        CullResultList list = CullResultList(&manager->allocator); // create a new result list
         OMath::Frustum *frustum = work->frustum;
+
+        size_t start = work->idx->fetch_add(work->cellsperjob); // get the current working index, while adding the number of cells to work through for the next worker.
+        size_t end = MIN(start + work->cellsperjob, manager->cells.size()); // either do all the cells that a worker is supposed to do, or work until the end of the list of cells.
+        printf("worker is assigned the range %lu to %lu\n", start, end);
 
         CullResult *res = NULL;
         size_t total = 0;
-        for (;;) {
-            const size_t index = work->idx->fetch_add(1); // Grab our working index.
-            if (index >= manager->cells.size()) {
-                return;
-            }
+        for (size_t index = start; index < end; index++) {
             total++;
 
             Cell *cell = manager->cells[index];
 
             if (res == NULL) {
-                res = list->acquire();
+                res = list.acquire();
             }
 
             if (frustum->testaabb(OMath::AABB(cell->header.origin, cell->header.origin + PARTITION_CELLSIZE)) == OMath::Frustum::INSIDE) {
@@ -239,7 +240,7 @@ namespace OScene {
                 // Directly copy everything inside the cell into the result implicitly (as we can assume total containment == all are visible).
                 while (remaining > 0) {
                     if (res->header.count == CullResult::COUNT) {
-                        res = list->acquire();
+                        res = list.acquire();
                     }
                     size_t remspace = CullResult::COUNT - res->header.count;
                     size_t step = glm::min(remaining, remspace);
@@ -250,10 +251,11 @@ namespace OScene {
                     remaining -= step;
                 }
             } else if (frustum->testaabb(OMath::AABB(cell->header.origin - PARTITION_CELLSIZE, cell->header.origin + PARTITION_CELLSIZE)) == OMath::Frustum::INTERSECT) {
-                manager->docull(cell, frustum, &res, list);
+                manager->docull(cell, frustum, &res, &list);
             }
         }
 
+        job->returnvalue = list.detach(); // our job's return value will be a detached list of culling nodes, that can be merged in later with the main result list.
     }
 
     CullResult *ParitionManager::cull(ORenderer::PerspectiveCamera &camera) {
@@ -266,17 +268,31 @@ namespace OScene {
         CullResultList list = CullResultList(&this->allocator);
         std::atomic<size_t> workeridx = 0; // Index into cell map list, atomic so only one worker is working on a cell at any one time.
 
-        struct work work = { .idx = &workeridx, .list = &list, .frustum = &camera.getfrustum(), .manager = this };
-        OJob::Counter *counter = new OJob::Counter();
-        for (size_t i = 0; i < this->cells.size() / OJob::numworkers; i++) { // Distribute work across the number of workers (not an exact science, only a best case average so that we have a possibility of all the work happening properly distributed).
-            OJob::Job *job = new OJob::Job(cullworker, (uintptr_t)&work);
-            job->counter = counter;
-            OJob::kickjob(job);
-        }
+        size_t cellsperjob = MAX(1, this->cells.size() / (OJob::numworkers * 2)); // even spread, but ensure at least one cell per job if the number of worker threads exceeds the number of cells. additionally, pessimistically assume that the job system will be in heavy use.
+        size_t numjobs = (this->cells.size() + cellsperjob - 1) / cellsperjob; // balance the number of jobs based on the number of cells and the number of cells per job.
 
+        printf("Dispatching culling work on %lu cells at a saturation of %lu jobs, with %lu cells per job.\n", this->cells.size(), numjobs, cellsperjob);
+        struct work work = { .idx = &workeridx, .frustum = &camera.getfrustum(), .manager = this, .cellsperjob = cellsperjob };
+        OJob::Counter *counter = new OJob::Counter();
+        OJob::Job **jobs = (OJob::Job **)malloc(sizeof(OJob::Job *) * numjobs);
+        ASSERT(jobs != NULL, "Failed to allocate memory for job list.\n");
+        for (size_t i = 0; i < numjobs; i++) { // Create a series of jobs to distribute the work over the worker threads.
+            jobs[i] = new OJob::Job(cullworker, (uintptr_t)&work);
+            jobs[i]->returns = true; // mark that this job returns a value.
+            jobs[i]->counter = counter;
+            OJob::kickjob(jobs[i]);
+        }
 
         counter->wait();
         delete counter;
+
+        for (size_t i = 0; i < numjobs; i++) {
+            void *ret = jobs[i]->returnvalue;
+            ASSERT(ret != NULL, "Job returned null value, it should be returning a result node.\n");
+            list.merge((CullResult *)ret); // merge results into main list.
+            delete jobs[i]; // clean up jobs.
+        }
+        free(jobs);
 
         return list.detach(); // Detach list from the handler.
     }

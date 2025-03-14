@@ -196,7 +196,7 @@ int main(int argc, const char **argv) {
 
     {
         ZoneScopedN("Object Creation");
-        for (size_t i = 0; i < 2048; i++) {
+        for (size_t i = 0; i < 4096; i++) {
             // break;
             OScene::Test *e = OScene::GameObject::create<OScene::Test>();
             e->scene = &scene2;
@@ -204,7 +204,7 @@ int main(int argc, const char **argv) {
             e->model->model = m->model->model;
             e->model->modelpath = "misc/test2.omod";
             e->bounds = m->bounds;
-            e->translate(glm::vec3(rand() % 400, rand() % 5, rand() % 400));
+            e->translate(glm::vec3(rand() % 40000, rand() % 5, rand() % 40000));
             e->setrotation(glm::vec3(glm::radians((float)(rand() % 40)), 0.0f, glm::radians((float)(rand() % 40))));
             e->silly();
             scene2.objects.push_back(e->gethandle());

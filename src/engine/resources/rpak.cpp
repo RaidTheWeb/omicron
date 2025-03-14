@@ -46,6 +46,7 @@ namespace OResource {
     }
 
     size_t RPak::read(const char *path, void *buf, const size_t size, const size_t off) {
+        ZoneScoped;
         ASSERT(path, "Attempting to read NULL file path.\n");
         ASSERT(buf, "Attempting to read into NULL buffer.\n");
         ASSERT(size > 0, "Read zero bytes.\n");
@@ -63,6 +64,7 @@ namespace OResource {
     found:
         ASSERT(!fseek(this->file, entry->offset + off, SEEK_SET), "Failed to seek file offset for path `%s` in RPAK.\n", path);
         if (true) {
+            // reads entire file in one go, isn't this slow?
             ASSERT(fread(buf, size, 1, this->file), "Failed to read file from RPAK.\n");
         } else { // compressed stuff
             ZoneScopedN("Compression read");

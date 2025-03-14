@@ -57,6 +57,7 @@ namespace ORenderer {
             // Memory budget available to texture streaming. 0 is debug for DO NOT TRACK.
             size_t memorybudget = 0;
 
+            OJob::Mutex operationsmutex;
             std::vector<Stream *> activeoperations;
 
             // Create managed texture from path (loads first mip level to GPU).

@@ -101,6 +101,17 @@ namespace OScene {
                 return tmp;
             }
 
+            // Merge another results list into result list.
+            void merge(CullResult *res) {
+                if (this->begin == NULL) {
+                    this->begin = res;
+                    this->end = res;
+                } else {
+                    this->end->header.next = res;
+                    this->end = res;
+                }
+            }
+
             // Acquire a new element for the list.
             CullResult *acquire(void) {
                 // this->mutex.lock();
@@ -133,9 +144,9 @@ namespace OScene {
         public:
             struct work {
                 std::atomic<size_t> *idx; // Reference to the index atomic.
-                CullResultList *list; // Reference to the result list.
                 OMath::Frustum *frustum; // Reference to the camera frustum.
                 ParitionManager *manager; // Reference to the partition manager this work is for.
+                size_t cellsperjob; // Number of cells to do per culling worker job.
             };
 
             std::unordered_map<glm::ivec3, Cell *, CellDescHasher> map;
