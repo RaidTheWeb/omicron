@@ -13,17 +13,4 @@ class PBRPipeline : public GraphicsPipeline {
         void postexecute(void);
 };
 
-class PBRPrimitivePass : public GraphicsPipelinePass {
-
-};
-
-class MainView : public GraphicsPipelineView {
-    public:
-
-        void init(void);
-        void resize(struct ORenderer::rect rendersize);
-        void update(uint64_t flags);
-        void execute(void);
-};
-
 #endif

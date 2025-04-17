@@ -1,5 +1,3 @@
-#include <engine/engine.hpp>
-
 #include <engine/renderer/bindless.hpp>
 #include <engine/renderer/pipeline/pbrpipeline.hpp>
 #include <engine/renderer/renderer.hpp>
@@ -281,8 +279,8 @@ void PBRPipeline::init(void) {
 
     ORenderer::textureview *depthviews[RENDERER_MAXLATENCY] = { &depthtexview[0], &depthtexview[1] };
     ORenderer::context->createbackbuffer(rpass, depthviews);
-    renderrect.width = engine_engine->winsize.x;
-    renderrect.height = engine_engine->winsize.y;
+    renderrect.width = winsize.x;
+    renderrect.height = winsize.y;
 
     ASSERT(ORenderer::context->createsampler(&outsampler, ORenderer::FILTER_NEAREST, ORenderer::FILTER_NEAREST, ORenderer::ADDR_CLAMPEDGE, 0.0f, false, 1.0f) == ORenderer::RESULT_SUCCESS, "Failed to create sampler.\n");
 
