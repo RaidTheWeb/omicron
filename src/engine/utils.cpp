@@ -21,9 +21,8 @@ void *utils_downsize(void *data, int size, int bpp) {
             }
         }
     }
-    return mip;
+    return mip; 
 }
-
 void *utils_generatemips(void *fullsize, int size, int bpp, size_t *length) {
     int64_t t = utils_getcounter();
     uint8_t *mipchain = (uint8_t *)malloc(size * size * bpp);

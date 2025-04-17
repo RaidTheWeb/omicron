@@ -211,16 +211,13 @@ namespace OScene {
 
     static void cullworker(OJob::Job *job) {
         ZoneScoped;
-        // printf("cull worker.\n");
         struct ParitionManager::work *work = (struct ParitionManager::work *)job->param;
         ParitionManager *manager = work->manager;
-        // CullResultList *list = work->list;
         CullResultList list = CullResultList(&manager->allocator); // create a new result list
         OMath::Frustum *frustum = work->frustum;
 
         size_t start = work->idx->fetch_add(work->cellsperjob); // get the current working index, while adding the number of cells to work through for the next worker.
         size_t end = MIN(start + work->cellsperjob, manager->cells.size()); // either do all the cells that a worker is supposed to do, or work until the end of the list of cells.
-        printf("worker is assigned the range %lu to %lu\n", start, end);
 
         CullResult *res = NULL;
         size_t total = 0;
@@ -260,7 +257,6 @@ namespace OScene {
 
     CullResult *ParitionManager::cull(ORenderer::PerspectiveCamera &camera) {
         ZoneScoped;
-        // NOTE: We can iterate over cells in an unordered_map yay! no need for an extra shoddy array implementation!
         if (!this->map.size()) {
             return NULL;
         }

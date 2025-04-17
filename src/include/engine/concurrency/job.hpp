@@ -132,6 +132,34 @@ namespace OJob {
 
     };
 
+    // Like a semaphore, but it lets us create a point of synchronisation for a bunch of jobs.
+    class Fence {
+        public:
+            Counter counter;
+
+            Fence(void) {
+                this->counter.ref = 1;
+            }
+
+            void wait(void) {
+                this->counter.wait(); // Called by a job, makes it wait on a fence.
+            }
+            void join(void) { // Ask that all jobs connected to this fence be completed, while also letting them continue.
+                Counter *counter = NULL;
+                if (this->counter.waitlist.size() > 0) {
+                    counter = this->counter.waitlist[0]->job->counter; // Get a reference to the counter of the first job waiting on the fence. XXX: This means that we can't wait properly if the jobs have any different counters.
+                }
+                this->counter.unreference(); // Unreference the counter.
+                if (counter != NULL) {
+                    counter->wait(); // Wait for the completion of any job waiting on this fence.
+                }
+
+            }
+            void reset(void) {
+                this->counter.ref.store(1);
+            }
+    };
+
     extern thread_local OJob::Fibre *currentfibre;
 
     struct worker {

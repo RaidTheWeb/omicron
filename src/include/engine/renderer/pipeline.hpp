@@ -43,6 +43,7 @@ class GraphicsPipeline {
 
         // void execute(size_t id); // execute pipeline on view (id based)
         virtual void execute(ORenderer::Stream *stream, void *cam) { };
+        virtual void postexecute(void) { };
 };
 
 // pass contains resources per-stage

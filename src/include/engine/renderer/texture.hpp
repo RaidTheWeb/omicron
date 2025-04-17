@@ -31,12 +31,19 @@ namespace ORenderer {
                 uint64_t timestamp; // Timestamp of last update (so we can exclude out of order updates).
                 uint32_t resolution; // Current resolution (derived from the maximum possible value for texture resolution)
             };
+            struct updatework {
+                Texture *texture;
+                struct updateinfo info;
+            };
             // Mutex locks :D
             // We can use mutexes here because texture streaming is actually a really low priority operation and contention isn't problematic.
             // XXX: There is probably a better way of doing this, look into it.
             OJob::Mutex mutex;
             struct updateinfo updateinfo; // Information of last upload.
 
+            std::atomic<size_t> idealresolution = 0; // ideal texture resolution, texture manager will try to dispatch workers to bring us up to this resolution.
+
+            std::unordered_map<uint32_t, struct buffer> stagingbuffers; // Map of resolutions compared to the staging buffer allocations containing them. This will be used when sending GPU upload commands from the texture manager.
             Texture(OUtils::Handle<OResource::Resource> resource);
             // Meet the required resolution.
             void meetresolution(struct updateinfo info);
@@ -60,11 +67,13 @@ namespace ORenderer {
             OJob::Mutex operationsmutex;
             std::vector<Stream *> activeoperations;
 
+            std::vector<Texture *> outstandingwork; // Textures that haven't met their ideal resolution yet, we'll put them in a list instead of looping through every texture during an update.
+            OJob::Fence fence;
+
             // Create managed texture from path (loads first mip level to GPU).
             OUtils::Handle<OResource::Resource> create(const char *path);
             OUtils::Handle<OResource::Resource> create(OUtils::Handle<OResource::Resource> resource);
-
-
+            void tick(void); // Runs at the end of a pipeline frame, ENFORCES that all ready texture jobs exit and release their information.
     };
 
     extern TextureManager texturemanager;

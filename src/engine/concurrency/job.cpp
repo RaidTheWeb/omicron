@@ -170,7 +170,6 @@ namespace OJob {
         if (OJob::currentfibre == NULL) { // experimental outside-of-job-system mutex usage (doesn't even act as a mutex, just a simple spin lock)
             bool expected = false;
             // Ensure exclusive access, spurious failure lets us reduce power consumption during this.
-            // NOTE: I was a little silly here earlier and forgot that this will return false whenever we fail, this meant I was letting through operations that should otherwise be mutex locked if attempting to acquire them on the main thread.
             while (!this->ref.compare_exchange_weak(expected, true)) { // busy wait until ref is unlocked, then immediately acquire it.
                 expected = false;
                 asm ("pause"); // Try to reduce load on the CPU during this (XXX: not non-x86 friendly!).
@@ -197,7 +196,7 @@ namespace OJob {
 
     void kickjobwait(OJob::Job *job) {
         ASSERT(job->counter != NULL, "Attempting to kick and wait on a job with no counter.\n");
-        OJob::Counter *counter = job->counter; // XXX: Store a reference to the counter before kicking the job! Knowing that we invalidate the job pointer memory when the job completes offers a possibility for job->counter to be invalidated if the calling thread yields for long enough for the worker thread to complete the job. Good practise is to write code to prevent this from happening.
+        OJob::Counter *counter = job->counter; // XXX: Store a reference to the counter before kicking the job! Knowing that we invalidate the job pointer memory when the job completes offers a possibility for job->counter to be invalidated if the calling thread yields for long enough for the worker thread to complete the job. Good practice is to write code to prevent this from happening.
         OJob::kickjob(job);
         counter->wait();
     }

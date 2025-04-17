@@ -32,4 +32,5 @@ omicron_symbols.ld
 **.plist.source
 **.cpp_clang-tidy**
 **.c_clang-tidy**
+**.ccls-cache**
 libs/libsbuilt

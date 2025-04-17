@@ -286,7 +286,6 @@ namespace OVulkan {
             void flushcmd(void);
 
             void adddependency(ORenderer::Stream *wait) {
-                printf("adding %lx as a depend.\n", wait);
                 this->waiton.push_back((VulkanStream *)wait);
             }
 

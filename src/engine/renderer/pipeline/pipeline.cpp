@@ -320,11 +320,9 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
 
     // printf("start of work.\n");
     OUtils::Handle<OResource::Resource> tex = OResource::manager.get("misc/test.otex*");
-    printf("%u < %u\n", res, tex->as<ORenderer::Texture>()->headers.header.levelcount);
     if (res == tex->as<ORenderer::Texture>()->headers.header.levelcount - 1) {
         backwardsnow = true;
     }
-    printf("before update %lu.\n", res);
     if (res >= 0 && frame % 4 && frame > 400) {
         if (backwardsnow && res > 0) {
             if (frame > 500) {
@@ -339,8 +337,9 @@ void PBRPipeline::execute(ORenderer::Stream *stream, void *cam) {
     struct ORenderer::Texture::updateinfo info = { };
     info.timestamp = utils_getcounter();
     info.resolution = res;
-    printf("moving to %u\n", res);
-    tex->as<ORenderer::Texture>()->meetresolution(info);
+    // if (res < 4) {
+        tex->as<ORenderer::Texture>()->meetresolution(info);
+    // }
 skip:
     frame++;
 
@@ -615,4 +614,9 @@ skip:
 
     stream->end();
     stream->release();
+}
+
+void PBRPipeline::postexecute(void) {
+    printf("triggering texture manager fence.\n");
+    ORenderer::texturemanager.tick();
 }

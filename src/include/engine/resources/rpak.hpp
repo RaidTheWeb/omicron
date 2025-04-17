@@ -3,10 +3,12 @@
 
 #include <engine/assertion.hpp>
 #include <engine/concurrency/job.hpp>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -19,7 +21,7 @@ namespace OResource {
     class RPak {
         private:
             OJob::Mutex lock;
-            FILE *file;
+            int fd;
         public:
             struct header {
                 char magic[5]; // RPAK\0
@@ -54,7 +56,7 @@ namespace OResource {
             RPak(const char *path);
             ~RPak(void) {
                 this->lock.lock();
-                fclose(this->file);
+                close(this->fd);
                 free(entries);
                 this->lock.unlock();
             }

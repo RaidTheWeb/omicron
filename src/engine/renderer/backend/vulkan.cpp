@@ -3094,6 +3094,7 @@ namespace OVulkan {
         // printf("pipeline begin.\n");
         ASSERT(pipeline != NULL, "It's so over!\n");
         pipeline->execute(&this->stream[this->frame], cam);
+        pipeline->postexecute();
         // printf("pipeline end.\n");
 
         // this->recordcmd(this->cmd[this->frame], image, &stream[this->frame]);

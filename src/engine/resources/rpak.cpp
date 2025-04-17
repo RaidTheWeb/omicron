@@ -7,24 +7,24 @@ namespace OResource {
     RPak::RPak(const char *path) {
         ASSERT(path, "Mount NULL path.\n");
 
-        FILE *f = fopen(path, "r");
-        ASSERT(f, "Failed to open RPAK to mount.\n");
-        ASSERT(!fseek(f, 0, SEEK_END), "Failed to seek to end of RPAK to determine file size.\n");
-        size_t size = ftell(f);
-        ASSERT(size != SIZE_MAX, "Failed to determine file size of RPAK.\n");
-        ASSERT(!fseek(f, 0, SEEK_SET), "Failed to rewind read pointer back to beginning of RPAK.\n");
+        int fd = open(path, O_RDONLY);
+        ASSERT(fd != -1, "Failed to open RPAK to mount.\n");
+
+        struct ::stat st;
+        ASSERT(!fstat(fd, &st), "Failed to determine file size of RPAK.\n");
+        size_t size = st.st_size;
 
         struct RPak::header header = { };
-        ASSERT(fread(&header, sizeof(struct RPak::header), 1, f), "Failed to read RPAK header.\n");
+        ASSERT(pread(fd, &header, sizeof(struct RPak::header), 0), "Failed to read RPAK header.\n");
         ASSERT(!strncmp(header.magic, "RPAK", sizeof(header.magic)), "Attempting to mount RPAK file that does not display magic.\n");
 
         struct RPak::tableentry *entries = (struct RPak::tableentry *)malloc(sizeof(struct RPak::tableentry) * header.num);
         ASSERT(entries != NULL, "Failed to allocate memory for RPAK table entries.\n");
-        ASSERT(fread(entries, sizeof(struct RPak::tableentry) * header.num, 1, f), "Failed to read RPAK table entries.\n");
+        ASSERT(pread(fd, entries, sizeof(struct RPak::tableentry) * header.num, sizeof(struct RPak::header)), "Failed to read RPAK table entries.\n");
 
         this->entries = entries;
         this->header = header;
-        this->file = f;
+        this->fd = fd;
     }
 
     struct RPak::stat RPak::stat(const char *path) {
@@ -50,7 +50,7 @@ namespace OResource {
         ASSERT(path, "Attempting to read NULL file path.\n");
         ASSERT(buf, "Attempting to read into NULL buffer.\n");
         ASSERT(size > 0, "Read zero bytes.\n");
-        OJob::ScopedMutex mutex(&this->lock);
+        // OJob::ScopedMutex mutex(&this->lock); XXX: With pread() we can do lockless reads.
 
         struct RPak::tableentry *entry = NULL;
         for (size_t i = 0; i < this->header.num; i++) {
@@ -62,10 +62,11 @@ namespace OResource {
 
         return 0;
     found:
-        ASSERT(!fseek(this->file, entry->offset + off, SEEK_SET), "Failed to seek file offset for path `%s` in RPAK.\n", path);
+        // ASSERT(!fseek(this->file, entry->offset + off, SEEK_SET), "Failed to seek file offset for path `%s` in RPAK.\n", path);
         if (true) {
             // reads entire file in one go, isn't this slow?
-            ASSERT(fread(buf, size, 1, this->file), "Failed to read file from RPAK.\n");
+            // ASSERT(fread(buf, size, 1, this->file), "Failed to read file from RPAK.\n");
+            ASSERT(pread(this->fd, buf, size, entry->offset + off), "Failed to read file from RPAK.\n");
         } else { // compressed stuff
             ZoneScopedN("Compression read");
             // XXX: FAR too expensive!
