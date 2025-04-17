@@ -34,3 +34,4 @@ omicron_symbols.ld
 **.c_clang-tidy**
 **.ccls-cache**
 libs/libsbuilt
+gamecontrollerdb.txt
